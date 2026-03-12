@@ -245,6 +245,31 @@ st.markdown("""
         color: #6B7280 !important;
     }
 
+    /* --- 解决手机端排版竖向堆叠问题 --- */
+    @media (max-width: 768px) {
+        /* 1. 强制所有 st.columns 的父容器保持横向，不允许折行 */
+        div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+        }
+        
+        /* 2. 让每一个 column 自适应宽度，均匀分布 */
+        div[data-testid="column"] {
+            width: auto !important;
+            flex: 1 1 0% !important; /* 让各列平分空间 */
+            min-width: 0 !important;
+            padding: 0 2px !important; /* 缩小手机端列与列之间的间距 */
+        }
+        
+        /* 3. 针对按钮文字可能过长的情况进行微调 */
+        div[data-testid="column"] button {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            font-size: 0.8rem !important; /* 稍微缩小字体以适应屏幕 */
+        }
+    }
+
     /* 11. 收款按钮样式优化 */
     .receive-btn {
         background-color: #FFFFFF !important;
@@ -937,30 +962,28 @@ def render_chat_session():
         }}
         </style>''', unsafe_allow_html=True)
 
-    # 顶部聊天头部：使用 columns，保证返回按钮能正确更新 view_mode
+    # 聊天头部：更紧凑的顶部栏，左右为返回/设置按钮，中间为昵称与“对方正在输入中...”提示
     c1, c2, c3 = st.columns([0.8, 3.4, 0.8])
     with c1:
-        if st.button("⬅️", key="chat_back", type="tertiary", use_container_width=True):
-            st.session_state.view_mode = "main"
-            st.rerun()
+        st.button("⬅️", on_click=lambda: st.session_state.update({"view_mode":"main"}), type="tertiary", use_container_width=True)
     with c2:
         safe_char_name = safe_text(char.get("name", ""))
         st.markdown(
             f"<div style='text-align:center; margin:2px 0 0 0;'>"
-            f"<div style='font-size:16px; font-weight:600; color:#111827; line-height:1.15;'>{safe_char_name}</div>"
+            f"<div style='font-size:16px; font-weight:600; color:#111827; line-height:1.1;'>{safe_char_name}</div>"
             f"<div id='typing-indicator' style='font-size:11px; color:#9CA3AF; margin-top:1px; min-height:14px;'></div>"
             f"</div>",
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
+        # 在昵称容器内部占位“对方正在输入中...”
         typing_placeholder = st.empty()
     with c3:
-        if st.button("⚙️", key="chat_settings", type="tertiary", use_container_width=True):
-            st.session_state.view_mode = "edit_char"
-            st.rerun()
-
+        st.button("⚙️", on_click=lambda: st.session_state.update({"view_mode":"edit_char"}), type="tertiary", use_container_width=True)
+    
+    # 更紧凑的分割线
     st.markdown(
         "<hr style='margin:4px 0 6px 0; border:none; border-top:1px solid #E5E7EB;'/>",
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
     
     # 消息循环
@@ -1667,7 +1690,7 @@ with main_content_container:
         elif st.session_state.active_tab == "我": 
             render_profile_page()
 
-# 固定底部导航栏渲染（回退到稳定的 columns 版本，不再输出原始 HTML）
+# 固定底部导航栏渲染（确保在所有页面都显示）
 st.markdown('<div class="nav-wrapper">', unsafe_allow_html=True)
 cols = st.columns(4)
 nav_items = [("💬 消息", "Echoem"), ("👥 通讯录", "通讯录"), ("🌍 发现", "发现"), ("👤 我", "我")]
