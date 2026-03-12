@@ -15,7 +15,7 @@ import string
 import html
 
 # ===================== 0. 全局设置 =====================
-st.set_page_config(page_title="Echoem", page_icon="🪽", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Echoem", page_icon="🪽", layout="wide", initial_sidebar_state="collapsed")
 
 # 注入全局优化 CSS（全面升级视觉体验）
 st.markdown("""
@@ -268,6 +268,47 @@ st.markdown("""
             padding-right: 0 !important;
             font-size: 0.8rem !important; /* 稍微缩小字体以适应屏幕 */
         }
+    }
+
+    /* ================= 手机端整体宽度适配 ================= */
+    @media (max-width: 768px) {
+
+        /* 页面整体宽度 */
+        .block-container {
+            max-width: 100% !important;
+            padding-left: 12px !important;
+            padding-right: 12px !important;
+        }
+
+        /* Streamlit 主容器 */
+        .stApp {
+            width: 100vw !important;
+            overflow-x: hidden !important;
+        }
+
+        /* 聊天气泡宽度更适合手机 */
+        .chat-bubble-content {
+            max-width: 82% !important;
+            font-size: 14px !important;
+        }
+
+        /* 消息列表卡片缩紧 */
+        .chat-item {
+            padding: 10px 12px !important;
+        }
+
+        /* 头像缩小一点 */
+        .chat-bubble-avatar {
+            width: 34px !important;
+            height: 34px !important;
+        }
+
+        /* 导航栏按钮更紧凑 */
+        .nav-wrapper .stButton>button {
+            font-size: 11px !important;
+            padding: 6px 4px !important;
+        }
+
     }
 
     /* 11. 收款按钮样式优化 */
