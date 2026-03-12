@@ -17,10 +17,45 @@ import html
 # ===================== 0. 全局设置 =====================
 st.set_page_config(page_title="Echoem", page_icon="🪽", layout="wide", initial_sidebar_state="collapsed")
 
-# 注入全局优化 CSS（全面升级视觉体验 + 移动端适配）
+# 关键修复：使用 JavaScript 强制设置 viewport（因为 Streamlit 不允许注入 head meta）
 st.markdown("""
-<!-- 关键：强制移动端使用设备宽度，防止页面被缩放 -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<script>
+    // 动态添加 viewport meta 标签（如果还没有的话）
+    if (!document.querySelector('meta[name="viewport"]')) {
+        var meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        document.getElementsByTagName('head')[0].appendChild(meta);
+    }
+    
+    // 强制设置 body 宽度为设备宽度
+    document.body.style.width = '100vw';
+    document.body.style.maxWidth = '100%';
+    document.body.style.overflowX = 'hidden';
+    
+    // 针对 Streamlit 主容器
+    var style = document.createElement('style');
+    style.textContent = `
+        /* 强制移动端宽度适配 */
+        @media (max-width: 768px) {
+            .stApp {
+                width: 100vw !important;
+                max-width: 100% !important;
+            }
+            .block-container {
+                max-width: 100% !important;
+                padding-left: 8px !important;
+                padding-right: 8px !important;
+            }
+            /* 防止横向滚动 */
+            body {
+                overflow-x: hidden !important;
+                position: relative !important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+</script>
 
 <style>
     /* 1. 基础重置 - 彻底清理原生样式 */
@@ -191,6 +226,8 @@ st.markdown("""
         border-bottom: 0.5px solid #E5E5E7;
         transition: background 0.2s;
         cursor: pointer;
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
     .chat-item:active { background-color: #F2F2F7; }
 
@@ -216,21 +253,25 @@ st.markdown("""
         /* 强制页面宽度为设备宽度，防止溢出 */
         html, body {
             width: 100vw !important;
-            overflow-x: hidden !important;
             max-width: 100% !important;
+            overflow-x: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
         
         /* 主容器宽度适配 */
         .block-container {
             max-width: 100% !important;
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-            padding-bottom: 100px !important; /* 增加底部padding防止被导航栏遮挡 */
+            width: 100% !important;
+            padding-left: 8px !important;
+            padding-right: 8px !important;
+            padding-bottom: 100px !important;
+            margin: 0 !important;
         }
 
         /* Streamlit 主容器 */
         .stApp {
-            width: 100vw !important;
+            width: 100% !important;
             max-width: 100% !important;
             overflow-x: hidden !important;
         }
@@ -242,6 +283,7 @@ st.markdown("""
             align-items: center !important;
             width: 100% !important;
             gap: 0 !important;
+            max-width: 100% !important;
         }
         
         /* 均匀分布列 */
@@ -250,6 +292,7 @@ st.markdown("""
             flex: 1 1 0% !important;
             min-width: 0 !important;
             padding: 0 2px !important;
+            max-width: 100% !important;
         }
         
         /* 导航栏按钮适配 */
@@ -258,6 +301,7 @@ st.markdown("""
             padding-right: 0 !important;
             font-size: 11px !important;
             width: 100% !important;
+            min-width: 0 !important;
         }
 
         /* 聊天气泡宽度优化 */
@@ -268,7 +312,9 @@ st.markdown("""
 
         /* 消息列表卡片缩紧 */
         .chat-item {
-            padding: 10px 12px !important;
+            padding: 10px 8px !important;
+            width: 100% !important;
+            max-width: 100vw !important;
         }
 
         /* 头像缩小 */
@@ -280,18 +326,33 @@ st.markdown("""
         /* 导航栏更紧凑 */
         .nav-wrapper {
             padding: 6px 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
         }
         .nav-wrapper .stButton>button {
             font-size: 11px !important;
             padding: 6px 2px !important;
+        }
+        
+        /* 修复消息列表溢出问题 */
+        .chat-list-item {
+            width: 100% !important;
+            max-width: 100vw !important;
+            overflow: hidden !important;
+        }
+        
+        /* 强制所有元素不溢出 */
+        * {
+            max-width: 100vw !important;
         }
     }
 
     /* 超小屏幕额外优化（如iPhone SE） */
     @media (max-width: 375px) {
         .block-container {
-            padding-left: 8px !important;
-            padding-right: 8px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
         }
         
         .chat-bubble-content {
@@ -302,6 +363,10 @@ st.markdown("""
         
         .nav-wrapper .stButton>button {
             font-size: 10px !important;
+        }
+        
+        .chat-item {
+            padding: 8px 6px !important;
         }
     }
 
@@ -1409,7 +1474,7 @@ def render_moments_page():
         st.markdown("""
         <div style='text-align:center; padding:60px 20px; color:#6B7280;'>
             <p style='font-size:16px;'>暂无动态</p>
-            <p style='font-size:14px; margin-top:8px;'>发布一条动态，和 AI 好友互动吧</p>
+            <p style='font-size:14px; margin-top:8px;'>发布一条动态，和好友互动吧</p>
         </div>
         """, unsafe_allow_html=True)
         return
