@@ -69,7 +69,7 @@ st.markdown("""
     }
     .block-container { 
         padding-top: 0.8rem !important; 
-        padding-bottom: 1.5rem !important; 
+        padding-bottom: 88px !important; /* 为底部导航栏留出空间 */
         max-width: 100vw !important; /* 核心：主容器宽度100vw */
         width: 100% !important;
         margin: 0 auto !important;
@@ -438,6 +438,74 @@ st.markdown("""
         .transfer-amount {
             font-size: 18px !important;
         }
+    }
+
+    /* 突破 Streamlit 的手机端限制，强制横向排列 */
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            flex-direction: row !important;
+        }
+        /* 确保内部列宽均匀分配 */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 0% !important;
+        }
+    }
+    /* 底部导航栏 - 固定底栏 + 苹果安全区（.nav-wrapper 由 JS 加在 4 列那一行上） */
+    .nav-wrapper {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        flex-direction: row !important;
+        justify-content: space-around !important;
+        background: #FFFFFF !important;
+        border-top: 1px solid #E5E7EB !important;
+        z-index: 9999 !important;
+        padding: 6px 0 !important;
+        padding-bottom: env(safe-area-inset-bottom) !important;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.03) !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+    }
+    .nav-wrapper [data-testid="column"] {
+        flex: 1 1 25% !important;
+        max-width: 25% !important;
+    }
+    .nav-wrapper .stButton > button {
+        width: 100% !important;
+        font-size: 10px !important;
+        padding: 6px 2px !important;
+        border-radius: 8px !important;
+        border: none !important;
+        background: transparent !important;
+        color: #6B7280 !important;
+    }
+    .nav-wrapper .stButton > button[kind="primary"] {
+        background: #EFF6FF !important;
+        color: #3B82F6 !important;
+        font-weight: 600 !important;
+    }
+
+    /* 消除 Streamlit 为透明按钮预留的外部高度 */
+    div.stButton:has(button[key^="overlay_"]) {
+        height: 0px !important;
+        min-height: 0px !important;
+        margin: 0px !important;
+        padding: 0px !important;
+    }
+
+    /* 确保透明按钮完全覆盖在列表项上 */
+    button[key^="overlay_"] {
+        position: absolute !important;
+        top: -72px !important; /* 向上偏移，正好覆盖刚才渲染的 HTML 列表项 */
+        height: 72px !important;
+        width: 100% !important;
+        opacity: 0 !important;
+        z-index: 999 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1073,49 +1141,20 @@ def render_chat_session():
         }}
         </style>''', unsafe_allow_html=True)
 
-    # 聊天头部：单行顶栏（返回|昵称|设置）；用 JS 对顶栏行设 inline style 强制横排，覆盖 Streamlit 手机端竖排
-    st.markdown(
-        "<script>document.body.classList.add('chat-view');</script>"
-        "<div class=\"chat-header-marker\" aria-hidden=\"true\"></div>",
-        unsafe_allow_html=True
-    )
-    c1, c2, c3 = st.columns([0.5, 3, 0.5])
-    with c1:
-        st.button("⬅️", on_click=lambda: st.session_state.update({"view_mode":"main"}), type="tertiary", use_container_width=True)
-    with c2:
-        safe_char_name = safe_text(char.get("name", ""))
-        st.markdown(
-            f"<div class='chat-header-center-wrap'>"
-            f"<span class='chat-name'>{safe_char_name}</span>"
-            f"<span id='typing-indicator' class='chat-typing'></span>"
-            f"</div>",
-            unsafe_allow_html=True
-        )
+    # 居中显示昵称，点击后弹出悬浮菜单
+    st.markdown("<script>document.body.classList.add('chat-view');</script>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col2:
+        # st.popover 会在点击后弹出一个气泡菜单，完美替代纵向堆叠
+        with st.popover(char["name"], use_container_width=True):
+            if st.button("⬅️ 返回消息列表", use_container_width=True):
+                st.session_state.view_mode = "main"
+                st.rerun()
+            if st.button("⚙️ 角色设置", use_container_width=True):
+                st.session_state.view_mode = "edit_char"
+                st.rerun()
         typing_placeholder = st.empty()
-    with c3:
-        st.button("⚙️", on_click=lambda: st.session_state.update({"view_mode":"edit_char"}), type="tertiary", use_container_width=True)
-    st.markdown(
-        "<hr style='margin:4px 0 6px 0; border:none; border-top:1px solid #E5E7EB;'/>"
-        "<script>"
-        "setTimeout(function(){"
-        "var m=document.querySelector('.chat-header-marker');"
-        "if(!m) return;"
-        "var vb=m.closest('[data-testid=\"stVerticalBlock\"]');"
-        "var sib=vb?vb.nextElementSibling:null;"
-        "while(sib&&!sib.querySelector('[data-testid=\"stHorizontalBlock\"]')) sib=sib.nextElementSibling;"
-        "var block=sib?sib.querySelector('[data-testid=\"stHorizontalBlock\"]'):null;"
-        "if(!block) return;"
-        "block.style.cssText='display:flex !important; flex-direction:row !important; flex-wrap:nowrap !important; align-items:center !important;';"
-        "var cols=block.querySelectorAll('[data-testid=\"column\"]');"
-        "if(cols.length>=3){"
-        "cols[0].style.cssText='flex:0 0 44px !important; min-width:44px !important;';"
-        "cols[2].style.cssText='flex:0 0 44px !important; min-width:44px !important;';"
-        "cols[1].style.cssText='flex:1 1 0% !important; min-width:0 !important;';"
-        "}"
-        "}, 50);"
-        "</script>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<hr style='margin:4px 0 6px 0; border:none; border-top:1px solid #E5E7EB;'/>", unsafe_allow_html=True)
     
     # 消息循环
     user_av = get_avatar_display(st.session_state.user_profile.get("avatar"), "👤")
@@ -1807,16 +1846,12 @@ def render_profile_page():
 
 NAV_ITEMS = [("💬 消息", "Echoem"), ("👥 通讯录", "通讯录"), ("🌍 发现", "发现"), ("👤 我", "我")]
 
-# 左上角菜单按钮：点击后在左侧召唤导航
-col_menu, col_title = st.columns([0.1, 0.9])
+# 左上角菜单按钮（仅图标，无旁边标题/索引）
+col_menu, _ = st.columns([0.1, 0.9])
 with col_menu:
     if st.button("☰", key="nav_menu_toggle", use_container_width=True, type="secondary", help="打开导航"):
         st.session_state.nav_drawer_open = not st.session_state.nav_drawer_open
         st.rerun()
-with col_title:
-    tab_titles = {"Echoem": "消息", "通讯录": "通讯录", "发现": "发现", "我": "我"}
-    current = tab_titles.get(st.session_state.active_tab, "Echoem")
-    st.markdown(f"<div class=\"nav-top-title\">{current}</div>", unsafe_allow_html=True)
 
 if st.session_state.nav_drawer_open:
     col_drawer, col_main = st.columns([0.28, 0.72])
@@ -1869,3 +1904,29 @@ else:
                 render_moments_page()
             elif st.session_state.active_tab == "我":
                 render_profile_page()
+
+# 底部导航栏（固定底栏，适配苹果安全区）
+st.markdown(
+    '<script>'
+    'setTimeout(function(){'
+    'var blocks=document.querySelectorAll("[data-testid=stHorizontalBlock]");'
+    'for(var i=blocks.length-1;i>=0;i--){'
+    'var cols=blocks[i].querySelectorAll("[data-testid=column]");'
+    'if(cols.length===4){ blocks[i].classList.add("nav-wrapper"); blocks[i].setAttribute("data-nav","1"); break; }'
+    '}'
+    '}, 100);'
+    '</script>',
+    unsafe_allow_html=True
+)
+nav_cols = st.columns(4)
+for i, (label, tab_name) in enumerate(NAV_ITEMS):
+    with nav_cols[i]:
+        if st.button(
+            label,
+            key=f"nav_bottom_{tab_name}",
+            use_container_width=True,
+            type="primary" if st.session_state.active_tab == tab_name else "tertiary"
+        ):
+            st.session_state.active_tab = tab_name
+            st.session_state.nav_drawer_open = False
+            st.rerun()
