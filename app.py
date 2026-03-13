@@ -51,7 +51,7 @@ st.markdown("""
     });
 </script>
 <style>
-    /* 1. 基础重置 - 彻底杜绝横向溢出 */
+    /* 1. 基础重置 - 彻底杜绝横向溢出，手机端一屏内 */
     html, body {
         width: 100vw !important;
         max-width: 100vw !important;
@@ -59,6 +59,10 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
         box-sizing: border-box !important;
+    }
+    @media (max-width: 768px) {
+        html, body { min-height: 100dvh !important; height: auto !important; }
+        .stApp { min-height: 100dvh !important; }
     }
     * {
         box-sizing: border-box !important;
@@ -75,6 +79,40 @@ st.markdown("""
         margin: 0 auto !important;
         padding-left: 6px !important;  /* 移动端收紧内边距 */
         padding-right: 6px !important;
+    }
+    /* 手机端：极简留白，一屏能看完 */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 0.25rem !important;
+            padding-bottom: 64px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+        }
+        [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
+            margin-bottom: 0 !important;
+        }
+        [data-testid="stVerticalBlock"] > div {
+            min-height: 0 !important;
+        }
+        /* 顶部菜单行压扁 */
+        .block-container > [data-testid="stVerticalBlock"]:first-child {
+            padding-top: 0 !important;
+            margin-bottom: 2px !important;
+        }
+        .block-container .stButton > button {
+            padding-top: 4px !important;
+            padding-bottom: 4px !important;
+        }
+        .block-container h3, .block-container [class*="stMarkdown"] h3 {
+            margin: 4px 0 8px 0 !important;
+            font-size: 1rem !important;
+        }
+        .chat-item {
+            padding: 6px 4px !important;
+        }
+        .chat-bubble-row { margin-bottom: 8px !important; }
+        .chat-bubble-content { padding: 10px 12px !important; }
     }
     /* 2. 整体视觉风格 - 保留原设计 */
     .stApp { 
@@ -154,6 +192,16 @@ st.markdown("""
         background: #F0F2F5 !important;
         padding-bottom: 6px !important;
         box-shadow: 0 1px 0 0 rgba(0,0,0,0.08);
+    }
+    @media (max-width: 768px) {
+        body.chat-view .block-container [data-testid="stVerticalBlock"]:has([data-testid="stHorizontalBlock"]:first-of-type) {
+            padding-bottom: 2px !important;
+        }
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"] .stButton > button,
+        body.chat-view [data-testid="stPopover"] button {
+            padding: 2px 6px !important;
+            min-height: 32px !important;
+        }
     }
     /* 4. 聊天气泡 - 移动端进一步优化宽度 */
     .chat-bubble-row { 
@@ -440,16 +488,23 @@ st.markdown("""
         }
     }
 
-    /* 突破 Streamlit 的手机端限制，强制横向排列 */
+    /* 突破 Streamlit 的手机端限制，强制横向排列 + 底部栏压扁 */
     @media (max-width: 768px) {
         [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important;
             flex-direction: row !important;
         }
-        /* 确保内部列宽均匀分配 */
         [data-testid="column"] {
             width: 100% !important;
             flex: 1 1 0% !important;
+        }
+        .nav-wrapper {
+            padding: 4px 0 !important;
+            padding-bottom: calc(4px + env(safe-area-inset-bottom)) !important;
+        }
+        .nav-wrapper .stButton > button {
+            padding: 4px 2px !important;
+            font-size: 9px !important;
         }
     }
     /* 底部导航栏 - 固定底栏 + 苹果安全区（.nav-wrapper 由 JS 加在 4 列那一行上） */
