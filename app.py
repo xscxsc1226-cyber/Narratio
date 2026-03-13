@@ -39,7 +39,8 @@ st.markdown("""
         document.body.classList.remove('chat-view'); // 非聊天页时移除，由聊天页再添加
         const horizontalBlocks = document.querySelectorAll('[data-testid="stHorizontalBlock"]');
         horizontalBlocks.forEach(blk => {
-            blk.style.width = '100vw';
+            blk.style.maxWidth = '100%';
+            blk.style.width = '100%';
             blk.style.overflowX = 'hidden';
         });
     });
@@ -80,29 +81,45 @@ st.markdown("""
         padding-left: 6px !important;  /* 移动端收紧内边距 */
         padding-right: 6px !important;
     }
-    /* 手机端：极简留白，一屏能看完 */
+    /* 手机端：极简留白 + 严格限宽，禁止顶栏/底栏/列表行撑破屏 */
     @media (max-width: 768px) {
         .block-container {
             padding-top: 0.25rem !important;
             padding-bottom: 64px !important;
             padding-left: 4px !important;
             padding-right: 4px !important;
+            width: 100% !important;
+            max-width: 100vw !important;
+            overflow-x: hidden !important;
         }
         [data-testid="stVerticalBlock"] {
             gap: 0 !important;
             margin-bottom: 0 !important;
+            max-width: 100% !important;
         }
         [data-testid="stVerticalBlock"] > div {
             min-height: 0 !important;
         }
-        /* 顶部菜单行压扁 */
+        [data-testid="stHorizontalBlock"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+        }
+        [data-testid="column"] {
+            min-width: 0 !important;
+            max-width: 100% !important;
+            overflow: hidden !important;
+        }
         .block-container > [data-testid="stVerticalBlock"]:first-child {
             padding-top: 0 !important;
             margin-bottom: 2px !important;
+            max-width: 100% !important;
         }
         .block-container .stButton > button {
             padding-top: 4px !important;
             padding-bottom: 4px !important;
+            max-width: 100% !important;
         }
         .block-container h3, .block-container [class*="stMarkdown"] h3 {
             margin: 4px 0 8px 0 !important;
@@ -201,6 +218,14 @@ st.markdown("""
         body.chat-view [data-testid="stPopover"] button {
             padding: 2px 6px !important;
             min-height: 32px !important;
+        }
+        /* 顶部昵称栏、popover 触发按钮不撑破屏 */
+        body.chat-view [data-testid="stPopover"] {
+            max-width: 100% !important;
+        }
+        body.chat-view [data-testid="stPopover"] > button {
+            width: 100% !important;
+            max-width: 100% !important;
         }
     }
     /* 4. 聊天气泡 - 移动端进一步优化宽度 */
@@ -333,8 +358,8 @@ st.markdown("""
         border-bottom: 0.5px solid #E5E5E7;
         transition: background 0.2s;
         cursor: pointer;
-        width: 100vw !important;
-        max-width: 100vw !important;
+        width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
         overflow: hidden !important;
     }
@@ -507,12 +532,15 @@ st.markdown("""
             font-size: 9px !important;
         }
     }
-    /* 底部导航栏 - 固定底栏 + 苹果安全区（.nav-wrapper 由 JS 加在 4 列那一行上） */
+    /* 底部导航栏 - 固定底栏 + 苹果安全区，严格不超屏宽 */
     .nav-wrapper {
         position: fixed !important;
         bottom: 0 !important;
         left: 0 !important;
         right: 0 !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
         display: flex !important;
         flex-wrap: nowrap !important;
         flex-direction: row !important;
@@ -523,12 +551,18 @@ st.markdown("""
         padding: 6px 0 !important;
         padding-bottom: env(safe-area-inset-bottom) !important;
         box-shadow: 0 -2px 10px rgba(0,0,0,0.03) !important;
-        width: 100vw !important;
-        max-width: 100vw !important;
+        overflow: hidden !important;
     }
     .nav-wrapper [data-testid="column"] {
-        flex: 1 1 25% !important;
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
         max-width: 25% !important;
+        overflow: hidden !important;
+    }
+    .nav-wrapper .stButton > button {
+        max-width: 100% !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
     .nav-wrapper .stButton > button {
         width: 100% !important;
