@@ -3,3 +3,7 @@ openai
 pillow
 supabase
 bcrypt
+streamlit-cookies-manager
+cryptography
+streamlit-cookies-manager
+cryptography
