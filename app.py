@@ -1073,9 +1073,10 @@ def render_chat_session():
         }}
         </style>''', unsafe_allow_html=True)
 
-    # 聊天头部：单行顶栏（返回 | 昵称+状态 | 设置），移动端保持横向不堆叠
+    # 聊天头部：单行顶栏（返回|昵称|设置）；用 JS 对顶栏行设 inline style 强制横排，覆盖 Streamlit 手机端竖排
     st.markdown(
-        "<script>document.body.classList.add('chat-view');</script><div class=\"chat-header-marker\" aria-hidden=\"true\"></div>",
+        "<script>document.body.classList.add('chat-view');</script>"
+        "<div class=\"chat-header-marker\" aria-hidden=\"true\"></div>",
         unsafe_allow_html=True
     )
     c1, c2, c3 = st.columns([0.5, 3, 0.5])
@@ -1093,7 +1094,28 @@ def render_chat_session():
         typing_placeholder = st.empty()
     with c3:
         st.button("⚙️", on_click=lambda: st.session_state.update({"view_mode":"edit_char"}), type="tertiary", use_container_width=True)
-    st.markdown("<hr style='margin:4px 0 6px 0; border:none; border-top:1px solid #E5E7EB;'/>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='margin:4px 0 6px 0; border:none; border-top:1px solid #E5E7EB;'/>"
+        "<script>"
+        "setTimeout(function(){"
+        "var m=document.querySelector('.chat-header-marker');"
+        "if(!m) return;"
+        "var vb=m.closest('[data-testid=\"stVerticalBlock\"]');"
+        "var sib=vb?vb.nextElementSibling:null;"
+        "while(sib&&!sib.querySelector('[data-testid=\"stHorizontalBlock\"]')) sib=sib.nextElementSibling;"
+        "var block=sib?sib.querySelector('[data-testid=\"stHorizontalBlock\"]'):null;"
+        "if(!block) return;"
+        "block.style.cssText='display:flex !important; flex-direction:row !important; flex-wrap:nowrap !important; align-items:center !important;';"
+        "var cols=block.querySelectorAll('[data-testid=\"column\"]');"
+        "if(cols.length>=3){"
+        "cols[0].style.cssText='flex:0 0 44px !important; min-width:44px !important;';"
+        "cols[2].style.cssText='flex:0 0 44px !important; min-width:44px !important;';"
+        "cols[1].style.cssText='flex:1 1 0% !important; min-width:0 !important;';"
+        "}"
+        "}, 50);"
+        "</script>",
+        unsafe_allow_html=True
+    )
     
     # 消息循环
     user_av = get_avatar_display(st.session_state.user_profile.get("avatar"), "👤")
