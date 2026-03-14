@@ -224,6 +224,23 @@ st.markdown("""
         body.chat-view .block-container [data-testid="stVerticalBlock"]:has([data-testid="stHorizontalBlock"]:first-of-type) {
             padding-bottom: 2px !important;
         }
+        /* 手机端：顶栏左对齐，取消左右空列占位，昵称与会话页面对齐 */
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type {
+            justify-content: flex-start !important;
+        }
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:first-child,
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:last-child {
+            flex: 0 0 0 !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            overflow: hidden !important;
+        }
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:nth-child(2) {
+            flex: 1 1 auto !important;
+            max-width: 100% !important;
+            text-align: left !important;
+        }
         body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"] .stButton > button,
         body.chat-view [data-testid="stPopover"] button {
             padding: 2px 6px !important;
