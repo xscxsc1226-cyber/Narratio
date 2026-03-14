@@ -223,23 +223,38 @@ st.markdown("""
     @media (max-width: 768px) {
         body.chat-view .block-container [data-testid="stVerticalBlock"]:has([data-testid="stHorizontalBlock"]:first-of-type) {
             padding-bottom: 2px !important;
+            padding-left: 0 !important;
+            margin-left: 0 !important;
         }
         /* 手机端：顶栏左对齐，取消左右空列占位，昵称与会话页面对齐 */
-        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type {
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type,
+        body.chat-view .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] {
             justify-content: flex-start !important;
+            margin-left: 0 !important;
+            padding-left: 0 !important;
+            width: 100% !important;
+        }
+        body.chat-view .chat-header-marker + [data-testid="stVerticalBlock"] {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
         }
         body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:first-child,
-        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:last-child {
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:last-child,
+        body.chat-view .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="column"]:first-child,
+        body.chat-view .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="column"]:last-child {
             flex: 0 0 0 !important;
             width: 0 !important;
             min-width: 0 !important;
             max-width: 0 !important;
             overflow: hidden !important;
         }
-        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:nth-child(2) {
+        body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:nth-child(2),
+        body.chat-view .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="column"]:nth-child(2) {
             flex: 1 1 auto !important;
             max-width: 100% !important;
             text-align: left !important;
+            margin-left: 0 !important;
+            padding-left: 0 !important;
         }
         body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"] .stButton > button,
         body.chat-view [data-testid="stPopover"] button {
@@ -1222,8 +1237,9 @@ def render_chat_session():
         }}
         </style>''', unsafe_allow_html=True)
 
-    # 居中显示昵称，点击后弹出悬浮菜单
+    # 居中显示昵称，点击后弹出悬浮菜单（手机端通过 CSS 左对齐与会话列表一致）
     st.markdown("<script>document.body.classList.add('chat-view');</script>", unsafe_allow_html=True)
+    st.markdown('<div class="chat-header-marker" aria-hidden="true"></div>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 4, 1])
     with col2:
         # st.popover 会在点击后弹出一个气泡菜单，完美替代纵向堆叠
