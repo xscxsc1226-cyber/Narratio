@@ -4,6 +4,7 @@ import time
 import re
 import json
 import os
+import ssl
 from PIL import Image
 import base64
 from datetime import datetime
@@ -14,6 +15,10 @@ from io import BytesIO
 import random
 import string
 import html
+try:
+    import httpx
+except ImportError:
+    httpx = None
 
 # ===================== 0. 全局设置 =====================
 st.set_page_config(page_title="Echoem", page_icon="🪽", layout="wide", initial_sidebar_state="collapsed")
@@ -74,7 +79,7 @@ st.markdown("""
     }
     .block-container { 
         padding-top: 0.8rem !important; 
-        padding-bottom: 88px !important; /* 为底部导航栏留出空间 */
+        padding-bottom: 1.5rem !important;
         max-width: 100vw !important; /* 核心：主容器宽度100vw */
         width: 100% !important;
         margin: 0 auto !important;
@@ -85,7 +90,7 @@ st.markdown("""
     @media (max-width: 768px) {
         .block-container {
             padding-top: 0.25rem !important;
-            padding-bottom: 64px !important;
+            padding-bottom: 1rem !important;
             padding-left: 4px !important;
             padding-right: 4px !important;
             width: 100% !important;
@@ -201,14 +206,19 @@ st.markdown("""
             min-width: 40px !important;
         }
     }
-    /* 聊天页顶栏固定：昵称栏（返回|昵称|设置）不随消息滚动 */
+    /* 聊天页顶栏固定：昵称栏透明底色，不随消息滚动 */
     body.chat-view .block-container [data-testid="stVerticalBlock"]:has([data-testid="stHorizontalBlock"]:first-of-type) {
         position: sticky !important;
         top: 0 !important;
         z-index: 100 !important;
-        background: #F0F2F5 !important;
+        background: transparent !important;
         padding-bottom: 6px !important;
-        box-shadow: 0 1px 0 0 rgba(0,0,0,0.08);
+        box-shadow: none !important;
+    }
+    body.chat-view [data-testid="stPopover"] > button {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
     @media (max-width: 768px) {
         body.chat-view .block-container [data-testid="stVerticalBlock"]:has([data-testid="stHorizontalBlock"]:first-of-type) {
@@ -350,35 +360,55 @@ st.markdown("""
     }
     .auth-title { font-size: 24px !important; font-weight: 700; color: #111827; margin-bottom: 8px; }
     .auth-subtitle { color: #6B7280; margin-bottom: 20px !important; font-size: 14px !important; }
-    /* 10. 消息列表项 - 核心：杜绝溢出，适配手机 */
+    /* 1. 强制网格重叠：让 HTML 和按钮强行在同一个格子里 */
+    [data-testid="stVerticalBlock"] > div:has(.chat-item-container) {
+        display: grid !important;
+        grid-template-areas: "overlay" !important;
+    }
+
+    .chat-item-container {
+        grid-area: overlay !important;
+        z-index: 1;
+    }
+
+    /* 2. 按钮容器：强行占领视觉层所在的空间 */
+    [data-testid="stElementContainer"]:has(button[title^="jump_"]) {
+        grid-area: overlay !important;
+        z-index: 2 !important; /* 确保在上面 */
+        height: 72px !important;
+        margin: 0 !important;
+    }
+
+    /* 3. 视觉层样式（人物框） */
     .chat-item {
         display: flex;
-        padding: 8px 6px !important; /* 收紧消息列表内边距 */
+        align-items: center;
+        padding: 0 16px;
         background: #FFFFFF;
         border-bottom: 0.5px solid #E5E5E7;
-        transition: background 0.2s;
-        cursor: pointer;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        overflow: hidden !important;
+        width: 100%;
+        height: 72px;
+        box-sizing: border-box;
+        pointer-events: none; /* 让鼠标穿透它 */
     }
-    .chat-item:active { background-color: #F2F2F7; }
-    /* 小箭头按钮 - 移动端适配 */
-    .chat-arrow .stButton>button {
+
+    /* 4. 透明按钮样式：全透明且铺满 */
+    button[title^="jump_"] {
+        width: 100% !important;
+        height: 72px !important;
+        min-height: 72px !important;
         background: transparent !important;
+        color: transparent !important;
         border: none !important;
         box-shadow: none !important;
-        width: 28px !important;
-        height: 28px !important;
-        padding: 0 !important;
-        border-radius: 14px !important;
-        font-size: 16px !important;
-        color: #9CA3AF !important;
+        cursor: pointer !important;
+        opacity: 0 !important; /* 调试时可以改成 0.1 看看位置 */
     }
-    .chat-arrow .stButton>button:hover {
-        background: #F3F4F6 !important;
-        color: #6B7280 !important;
+
+    /* 移动端优化：点击时的反馈感 */
+    button[title^="jump_"]:active {
+        background: rgba(0,0,0,0.05) !important;
+        opacity: 1 !important;
     }
     /* 11. 收款按钮 - 移动端适配 */
     .receive-btn {
@@ -523,78 +553,6 @@ st.markdown("""
             width: 100% !important;
             flex: 1 1 0% !important;
         }
-        .nav-wrapper {
-            padding: 4px 0 !important;
-            padding-bottom: calc(4px + env(safe-area-inset-bottom)) !important;
-        }
-        .nav-wrapper .stButton > button {
-            padding: 4px 2px !important;
-            font-size: 9px !important;
-        }
-    }
-    /* 底部导航栏 - 固定底栏 + 苹果安全区，严格不超屏宽 */
-    .nav-wrapper {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        max-width: 100vw !important;
-        box-sizing: border-box !important;
-        display: flex !important;
-        flex-wrap: nowrap !important;
-        flex-direction: row !important;
-        justify-content: space-around !important;
-        background: #FFFFFF !important;
-        border-top: 1px solid #E5E7EB !important;
-        z-index: 9999 !important;
-        padding: 6px 0 !important;
-        padding-bottom: env(safe-area-inset-bottom) !important;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.03) !important;
-        overflow: hidden !important;
-    }
-    .nav-wrapper [data-testid="column"] {
-        flex: 1 1 0% !important;
-        min-width: 0 !important;
-        max-width: 25% !important;
-        overflow: hidden !important;
-    }
-    .nav-wrapper .stButton > button {
-        max-width: 100% !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-    }
-    .nav-wrapper .stButton > button {
-        width: 100% !important;
-        font-size: 10px !important;
-        padding: 6px 2px !important;
-        border-radius: 8px !important;
-        border: none !important;
-        background: transparent !important;
-        color: #6B7280 !important;
-    }
-    .nav-wrapper .stButton > button[kind="primary"] {
-        background: #EFF6FF !important;
-        color: #3B82F6 !important;
-        font-weight: 600 !important;
-    }
-
-    /* 消除 Streamlit 为透明按钮预留的外部高度 */
-    div.stButton:has(button[key^="overlay_"]) {
-        height: 0px !important;
-        min-height: 0px !important;
-        margin: 0px !important;
-        padding: 0px !important;
-    }
-
-    /* 确保透明按钮完全覆盖在列表项上 */
-    button[key^="overlay_"] {
-        position: absolute !important;
-        top: -72px !important; /* 向上偏移，正好覆盖刚才渲染的 HTML 列表项 */
-        height: 72px !important;
-        width: 100% !important;
-        opacity: 0 !important;
-        z-index: 999 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -890,6 +848,30 @@ def update_memory_bank(char, user_msg, ai_response):
 
 # ===================== 2. 身份验证 =====================
 
+def _is_network_or_ssl_error(e):
+    """判断是否为网络/SSL 连接类错误（Supabase 请求失败时友好提示）"""
+    if isinstance(e, ssl.SSLError):
+        return True
+    if httpx and isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return True
+    msg = str(e).lower()
+    return "ssl" in msg or "eof" in msg or "connection" in msg or "connect" in msg
+
+def _supabase_request_with_retry(request_fn, max_attempts=2):
+    """执行 Supabase 请求，失败时重试一次（应对瞬时 SSL/网络中断）"""
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            return request_fn()
+        except Exception as e:
+            last_err = e
+            if _is_network_or_ssl_error(e) and attempt < max_attempts - 1:
+                time.sleep(1.5)
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
+
 def try_restore_session_from_cookie():
     """从持久化 Cookie 恢复登录状态（同一设备再次打开网页时免登录）"""
     val = cookies.get("echoem_login")
@@ -902,7 +884,14 @@ def try_restore_session_from_cookie():
         username = data.get("username")
         if not username:
             return False
-        res = supabase.table("user_data").select("*").eq("username", username).execute()
+        try:
+            res = _supabase_request_with_retry(
+                lambda: supabase.table("user_data").select("*").eq("username", username).execute()
+            )
+        except Exception as e:
+            if _is_network_or_ssl_error(e):
+                return False  # 静默失败，让用户重新登录
+            raise
         if not res.data:
             return False
         row = res.data[0]
@@ -946,8 +935,19 @@ def check_password():
             u = st.text_input("账号", key="l_u", placeholder="请输入你的账号")
             p = st.text_input("密码", type="password", key="l_p", placeholder="请输入你的密码")
             if st.button("进入", use_container_width=True, type="primary"):
-                res = supabase.table("user_data").select("*").eq("username", u).execute()
-                if res.data and verify_password(p, res.data[0]["password_hash"]):
+                try:
+                    res = _supabase_request_with_retry(
+                        lambda: supabase.table("user_data").select("*").eq("username", u).execute()
+                    )
+                except Exception as e:
+                    if _is_network_or_ssl_error(e):
+                        st.error("无法连接服务器，请检查网络或稍后重试。若使用代理，请确认 SSL 正常。")
+                    else:
+                        raise
+                    res = None
+                if res is None:
+                    pass  # 已展示网络错误
+                elif res.data and verify_password(p, res.data[0]["password_hash"]):
                     # 数据迁移：为旧角色添加memory_bank
                     characters = res.data[0]["characters"] or []
                     for char in characters:
@@ -968,7 +968,7 @@ def check_password():
                         "moments":res.data[0]["moments"] or []
                     })
                     st.rerun()
-                else: 
+                else:
                     st.error("账号或密码错误", icon="❌")
             st.markdown("</div>", unsafe_allow_html=True)
             
@@ -986,21 +986,28 @@ def check_password():
                     if not validate_username(nu):
                         st.error("账号名只能包含英文字母和数字", icon="❌")
                     else:
-                        # 检查账号是否已存在
-                        res = supabase.table("user_data").select("username").eq("username", nu).execute()
-                        if res.data:
-                            st.error("该账号已存在", icon="❌")
-                        else:
-                            supabase.table("user_data").insert({
-                                "username":nu, 
-                                "password_hash":hash_password(np), 
-                                "profile":{"nickname":nu,"avatar":None,"global_api_key":"","global_provider":"deepseek","global_model":"deepseek-chat"}, 
-                                "characters":[], 
-                                "moments":[]
-                            }).execute()
-                            st.success("注册成功，请至登录页进入账号...", icon="✅")
-                            time.sleep(1)
-                            st.rerun()
+                        try:
+                            res = _supabase_request_with_retry(
+                                lambda: supabase.table("user_data").select("username").eq("username", nu).execute()
+                            )
+                            if res.data:
+                                st.error("该账号已存在", icon="❌")
+                            else:
+                                supabase.table("user_data").insert({
+                                    "username":nu, 
+                                    "password_hash":hash_password(np), 
+                                    "profile":{"nickname":nu,"avatar":None,"global_api_key":"","global_provider":"deepseek","global_model":"deepseek-chat"}, 
+                                    "characters":[], 
+                                    "moments":[]
+                                }).execute()
+                                st.success("注册成功，请至登录页进入账号...", icon="✅")
+                                time.sleep(1)
+                                st.rerun()
+                        except Exception as e:
+                            if _is_network_or_ssl_error(e):
+                                st.error("无法连接服务器，请检查网络或稍后重试。若使用代理，请确认 SSL 正常。")
+                            else:
+                                raise
                 else:
                     st.warning("账号和密码不能为空", icon="⚠️")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -1134,13 +1141,13 @@ def handle_moment_interaction(moment, user_text, target_char_name=None, reply_to
 # ===================== 5. 页面渲染 =====================
 
 def render_chat_list_page():
-    st.markdown("<h3 style='text-align:center; margin:10px 0 20px 0; color:#111827;'>消息</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; margin:10px 0;'>消息</h3>", unsafe_allow_html=True)
 
+    display_chars = st.session_state.characters or []
     # 类微信：按最近消息条数近似排序（真实项目可存 timestamp）
     def last_ts(c):
         return len(c.get("messages", []))
-
-    display_chars = sorted(st.session_state.characters, key=last_ts, reverse=True)
+    display_chars = sorted(display_chars, key=last_ts, reverse=True)
 
     if not display_chars:
         st.markdown("""
@@ -1150,66 +1157,34 @@ def render_chat_list_page():
         </div>
         """, unsafe_allow_html=True)
         return
-    
-    # 预先整理每个角色的最后一条消息，用于摘要展示
-    last_msgs = {}
-    for c in display_chars:
-        msgs = c.get("messages", [])
-        last = msgs[-1]["content"] if msgs else "暂无消息"
-        last_msgs[c["id"]] = (last or "暂无消息").replace("\n", " ").strip()
 
-    # 渲染消息列表：左侧纯展示，右侧小箭头按钮负责跳转
     for char in display_chars:
-        last_msg = last_msgs.get(char["id"], "暂无消息")
-        safe_name = html.escape(char["name"])
-        safe_last_msg = html.escape(last_msg)
+        # 获取头像和最后消息
         avatar_html = get_avatar_html(char.get("avatar"))
+        last_msg = (char.get("messages", [])[-1]["content"] if char.get("messages") else "暂无消息") or "暂无消息"
+        last_msg = html.escape(str(last_msg)[:18])
+        safe_name = html.escape(char["name"])
 
-        # 左右布局：左侧纯展示，右侧是紧凑的小箭头按钮
-        chat_html = f"""
-        <div class="chat-item">
-            <div style="display: flex; align-items: center; width: 100%;">
-                <div style="flex-shrink: 0; margin-right: 12px;">
-                    {avatar_html}
-                </div>
-                <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
-                    <div style="
-                        font-size: 16px; 
-                        font-weight: 500; 
-                        color: #1a1a1a; 
-                        line-height: 1.4;
-                        margin-bottom: 2px;
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                    ">
-                        {safe_name}
-                    </div>
-                    <div style="
-                        font-size: 13px; 
-                        color: #8e8e93; 
-                        white-space: nowrap; 
-                        overflow: hidden; 
-                        text-overflow: ellipsis;
-                        line-height: 1.2;
-                    ">
-                        {safe_last_msg}
+        # --- 步骤 1：视觉层（增加外层 div 让 CSS 识别“待重合”区域）---
+        st.markdown(f"""
+        <div class="chat-item-container">
+            <div class="chat-item">
+                <div style="margin-right: 12px;">{avatar_html}</div>
+                <div style="flex-grow: 1; overflow: hidden;">
+                    <div style="font-size: 16px; font-weight: 500; color: #1a1a1a;">{safe_name}</div>
+                    <div style="font-size: 13px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {last_msg}
                     </div>
                 </div>
             </div>
         </div>
-        """
+        """, unsafe_allow_html=True)
 
-        col1, col2 = st.columns([0.9, 0.1])
-        with col1:
-            st.markdown(chat_html, unsafe_allow_html=True)
-        with col2:
-            st.markdown('<div class="chat-arrow" style="display:flex;align-items:center;justify-content:center;height:100%;">', unsafe_allow_html=True)
-            if st.button("›", key=f"go_{char['id']}", help=f"与 {char['name']} 聊天", use_container_width=True):
-                st.session_state.current_char_id = char["id"]
-                st.session_state.view_mode = "chat"
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+        # --- 步骤 2：交互层（必须紧跟在上面的 markdown 后面）---
+        if st.button("进入", key=f"btn_{char['id']}", help=f"jump_{char['id']}", use_container_width=True):
+            st.session_state.current_char_id = char["id"]
+            st.session_state.view_mode = "chat"
+            st.rerun()
 
 def render_chat_session():
     char = get_current_char()
@@ -1993,29 +1968,3 @@ else:
                 render_moments_page()
             elif st.session_state.active_tab == "我":
                 render_profile_page()
-
-# 底部导航栏（固定底栏，适配苹果安全区）
-st.markdown(
-    '<script>'
-    'setTimeout(function(){'
-    'var blocks=document.querySelectorAll("[data-testid=stHorizontalBlock]");'
-    'for(var i=blocks.length-1;i>=0;i--){'
-    'var cols=blocks[i].querySelectorAll("[data-testid=column]");'
-    'if(cols.length===4){ blocks[i].classList.add("nav-wrapper"); blocks[i].setAttribute("data-nav","1"); break; }'
-    '}'
-    '}, 100);'
-    '</script>',
-    unsafe_allow_html=True
-)
-nav_cols = st.columns(4)
-for i, (label, tab_name) in enumerate(NAV_ITEMS):
-    with nav_cols[i]:
-        if st.button(
-            label,
-            key=f"nav_bottom_{tab_name}",
-            use_container_width=True,
-            type="primary" if st.session_state.active_tab == tab_name else "tertiary"
-        ):
-            st.session_state.active_tab = tab_name
-            st.session_state.nav_drawer_open = False
-            st.rerun()
