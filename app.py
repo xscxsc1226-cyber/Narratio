@@ -1134,6 +1134,7 @@ def render_chat_session():
         "padding: 4px 0 6px 0 !important; min-height: 0 !important; "
         "}"
         "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) [data-testid=\"column\"] { "
+        "flex: 0 0 auto !important; max-width: none !important; "
         "display: flex !important; justify-content: center !important; align-items: center !important; padding: 0 4px !important; "
         "}"
         "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) .stPopover > button { "
@@ -1143,6 +1144,33 @@ def render_chat_session():
         "}"
         "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) .stPopover > button:hover { background: #FAFAFA !important; }"
         "</style>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<script>"
+        "function centerNicknameRow(){"
+        "  var rows=document.querySelectorAll('[data-testid=stHorizontalBlock]');"
+        "  for(var i=0;i<rows.length;i++){"
+        "    if(rows[i].querySelector('.stPopover')){"
+        "      var r=rows[i];"
+        "      r.style.setProperty('width','100%','important');"
+        "      r.style.setProperty('display','flex','important');"
+        "      r.style.setProperty('justify-content','center','important');"
+        "      r.style.setProperty('align-items','center','important');"
+        "      var cols=r.querySelectorAll('[data-testid=column]');"
+        "      for(var j=0;j<cols.length;j++){"
+        "        cols[j].style.setProperty('flex','0 0 auto','important');"
+        "        cols[j].style.setProperty('display','flex','important');"
+        "        cols[j].style.setProperty('justify-content','center','important');"
+        "      }"
+        "      return;"
+        "    }"
+        "  }"
+        "}"
+        "centerNicknameRow();"
+        "setTimeout(centerNicknameRow,150);"
+        "setTimeout(centerNicknameRow,500);"
+        "</script>",
         unsafe_allow_html=True
     )
     col_left, col_center, col_right = st.columns([1, 1, 1])
