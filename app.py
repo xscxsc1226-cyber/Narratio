@@ -4,7 +4,6 @@ import time
 import re
 import json
 import os
-import ssl
 from PIL import Image
 import base64
 from datetime import datetime
@@ -15,13 +14,10 @@ from io import BytesIO
 import random
 import string
 import html
-try:
-    import httpx
-except ImportError:
-    httpx = None
+import httpx
 
 # ===================== 0. 全局设置 =====================
-st.set_page_config(page_title="Echoem", page_icon="🪽", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Narratio", page_icon="📜", layout="wide", initial_sidebar_state="collapsed")
 
 # 关键修复：使用 JavaScript 强制设置 viewport（因为 Streamlit 不允许注入 head meta）
 st.markdown("""
@@ -44,8 +40,7 @@ st.markdown("""
         document.body.classList.remove('chat-view'); // 非聊天页时移除，由聊天页再添加
         const horizontalBlocks = document.querySelectorAll('[data-testid="stHorizontalBlock"]');
         horizontalBlocks.forEach(blk => {
-            blk.style.maxWidth = '100%';
-            blk.style.width = '100%';
+            blk.style.width = '100vw';
             blk.style.overflowX = 'hidden';
         });
     });
@@ -57,7 +52,7 @@ st.markdown("""
     });
 </script>
 <style>
-    /* 1. 基础重置 - 彻底杜绝横向溢出，手机端一屏内 */
+    /* ========== 1. 基础重置 - 极简 Ins 风格 ========== */
     html, body {
         width: 100vw !important;
         max-width: 100vw !important;
@@ -65,237 +60,129 @@ st.markdown("""
         margin: 0 !important;
         padding: 0 !important;
         box-sizing: border-box !important;
+        background-color: #FAFAFA !important;
     }
-    @media (max-width: 768px) {
-        html, body { min-height: 100dvh !important; height: auto !important; }
-        .stApp { min-height: 100dvh !important; }
-    }
-    * {
-        box-sizing: border-box !important;
-        max-width: 100vw !important; /* 所有元素最大宽度不超过屏幕 */
-    }
-    [data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {
-        display: none !important;
-    }
+    * { box-sizing: border-box !important; max-width: 100vw !important; }
+    [data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer { display: none !important; }
     .block-container { 
-        padding-top: 0.8rem !important; 
-        padding-bottom: 1.5rem !important;
-        max-width: 100vw !important; /* 核心：主容器宽度100vw */
+        padding-top: 0 !important; 
+        padding-bottom: 0 !important; 
+        max-width: 100vw !important;
         width: 100% !important;
         margin: 0 auto !important;
-        padding-left: 6px !important;  /* 移动端收紧内边距 */
-        padding-right: 6px !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
     }
-    /* 手机端：极简留白 + 严格限宽，禁止顶栏/底栏/列表行撑破屏 */
-    @media (max-width: 768px) {
-        .block-container {
-            padding-top: 0.25rem !important;
-            padding-bottom: 1rem !important;
-            padding-left: 4px !important;
-            padding-right: 4px !important;
-            width: 100% !important;
-            max-width: 100vw !important;
-            overflow-x: hidden !important;
-        }
-        [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-            margin-bottom: 0 !important;
-            max-width: 100% !important;
-        }
-        [data-testid="stVerticalBlock"] > div {
-            min-height: 0 !important;
-        }
-        [data-testid="stHorizontalBlock"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            overflow: hidden !important;
-        }
-        [data-testid="column"] {
-            min-width: 0 !important;
-            max-width: 100% !important;
-            overflow: hidden !important;
-        }
-        .block-container > [data-testid="stVerticalBlock"]:first-child {
-            padding-top: 0 !important;
-            margin-bottom: 2px !important;
-            max-width: 100% !important;
-        }
-        .block-container .stButton > button {
-            padding-top: 4px !important;
-            padding-bottom: 4px !important;
-            max-width: 100% !important;
-        }
-        .block-container h3, .block-container [class*="stMarkdown"] h3 {
-            margin: 4px 0 8px 0 !important;
-            font-size: 1rem !important;
-        }
-        .chat-bubble-row { margin-bottom: 8px !important; }
-        .chat-bubble-content { padding: 10px 12px !important; }
-    }
-    /* 2. 整体视觉风格 - 保留原设计 */
     .stApp { 
-        background-color: #F0F2F5; 
+        background-color: #FAFAFA !important; 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
         width: 100vw !important;
         max-width: 100vw !important;
         overflow-x: hidden !important;
     }
-    /* 2.1 左上角菜单栏 - 点击召唤左侧导航 */
-    .nav-top-bar { margin-bottom: 4px !important; }
-    .nav-top-title { font-size: 1rem !important; color: #6B7280 !important; font-weight: 600 !important; }
-    /* =========================================
-       1. 修复会话列表重合问题（通过 st.container 锁定）
-       ========================================= */
-    /* 选中只包含特定按钮的独立容器区块 */
-    [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] button[title^="jump_"]) {
-        position: relative !important;
-        height: 72px !important; /* 锁死高度 */
+    /* 2. 导航栏 - 白底细边 */
+    .nav-top-bar { 
+        padding: 12px 16px !important;
+        background: #FFFFFF !important;
+        border-bottom: 1px solid #DBDBDB !important;
         margin-bottom: 0 !important;
-        padding: 0 !important;
+    }
+    .nav-top-title { 
+        font-size: 1.15rem !important; 
+        color: #000000 !important; 
+        font-weight: 600 !important; 
+        text-align: center;
+    }
+    /* 3. 聊天详情页顶栏 - 单行横向，贴合聊天习惯，移动端不纵向堆叠 */
+    .chat-header-marker ~ [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"]:first-child,
+    .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        align-items: center !important;
         gap: 0 !important;
     }
-
-    /* 容器里的第一个元素：人物框 HTML (置于底层) */
-    [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] button[title^="jump_"]) > [data-testid="stElementContainer"]:nth-child(1) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 72px !important;
-        z-index: 1 !important;
+    .chat-header-marker ~ [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"],
+    .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"] {
+        min-width: 0 !important;
     }
-
-    /* 容器里的第二个元素：按钮 (置于顶层) */
-    [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] button[title^="jump_"]) > [data-testid="stElementContainer"]:nth-child(2) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 72px !important;
-        z-index: 10 !important;
+    .chat-header-marker ~ [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:first-child,
+    .chat-header-marker ~ [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:last-child,
+    .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:first-child,
+    .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:last-child {
+        flex: 0 0 44px !important;
+        max-width: 48px !important;
     }
-
-    /* 按钮透明化 & 全覆盖 */
-    button[title^="jump_"] {
-        width: 100% !important;
-        height: 72px !important;
-        min-height: 72px !important;
-        background: transparent !important;
-        color: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        cursor: pointer !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-
-    /* 移动端点击反馈 */
-    button[title^="jump_"]:active {
-        background: rgba(0,0,0,0.05) !important;
-    }
-
-    /* =========================================
-       2. 详情页顶部导航栏（仅昵称下拉，无返回键）
-       ========================================= */
-    /* 顶栏行：第一列含 popover 的横排 */
-    [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:first-child [data-testid="stPopover"]) {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        width: 100% !important;
-        flex-wrap: nowrap !important;
-    }
-
-    /* 第一列：昵称 popover，撑满并居中 */
-    [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:first-child [data-testid="stPopover"]) > [data-testid="column"]:nth-child(1) {
+    .chat-header-marker ~ [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(2),
+    .chat-header-marker + [data-testid="stVerticalBlock"] [data-testid="stHorizontalBlock"] [data-testid="column"]:nth-child(2) {
         flex: 1 1 auto !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        width: auto !important;
+        overflow: hidden !important;
     }
-
-    /* 第二列：占位符，保持平衡 */
-    [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:first-child [data-testid="stPopover"]) > [data-testid="column"]:nth-child(2) {
-        flex: 0 0 50px !important;
-        width: 50px !important;
-        min-width: 50px !important;
-    }
-
-    /* 顶栏昵称：透明可点击按钮，点击展开下拉菜单 */
-    [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:first-child [data-testid="stPopover"]) [data-testid="stPopover"] > button {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: #111827 !important;
-        font-size: 1.125rem !important;
-        font-weight: 600 !important;
-        justify-content: center !important;
-    }
-    [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:first-child [data-testid="stPopover"]) [data-testid="stPopover"] > button:hover {
-        background: rgba(0,0,0,0.05) !important;
-    }
-
-    /* 4. 聊天气泡 - 移动端进一步优化宽度 */
+    .chat-header-center-wrap { display: flex !important; align-items: center !important; justify-content: center !important; flex-direction: column !important; gap: 0 !important; min-height: 40px !important; text-align: center !important; overflow: hidden !important; }
+    .chat-header-center-wrap .chat-name { font-size: 15px !important; font-weight: 600 !important; color: #000000 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; line-height: 1.2 !important; }
+    .chat-header-center-wrap .chat-typing { font-size: 11px !important; color: #8E8E8E !important; min-height: 14px !important; line-height: 1.2 !important; }
+    body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type { flex-wrap: nowrap !important; align-items: center !important; gap: 0 !important; }
+    body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:first-child,
+    body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:last-child { flex: 0 0 44px !important; max-width: 48px !important; min-width: 0 !important; }
+    body.chat-view .block-container [data-testid="stHorizontalBlock"]:first-of-type [data-testid="column"]:nth-child(2) { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; }
+    /* 3. 聊天气泡 - Ins 风格：对方黑底白字，我方白底黑框 */
     .chat-bubble-row { 
-        display: flex; 
-        margin-bottom: 12px !important; 
-        align-items: flex-end !important; /* 气泡与头像底部对齐，更自然 */
+        display: flex !important; 
+        margin-bottom: 20px !important; 
+        align-items: flex-end !important;
         position: relative;
         width: 100% !important;
+        animation: bubbleFade 0.25s ease !important;
     }
+    @keyframes bubbleFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     .chat-bubble-row.me { justify-content: flex-end; }
     .chat-bubble-avatar { 
-        width: 34px !important; /* 移动端固定小头像 */
-        height: 34px !important;
+        width: 38px !important;
+        height: 38px !important;
         border-radius: 50%;
         overflow: hidden; 
-        margin: 0 6px !important; /* 收紧头像边距 */
+        margin: 0 10px !important;
         flex-shrink: 0; 
-        background-color: #F3F4F6;
+        background-color: #EFEFEF;
         display: flex; 
         align-items: center; 
         justify-content: center; 
-        font-size: 16px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        font-size: 18px !important;
+        border: 1px solid #EFEFEF;
     }
-    .chat-bubble-avatar img { 
-        width: 100%; 
-        height: 100%; 
-        object-fit: cover; 
-    }
+    .chat-bubble-avatar img { width: 100%; height: 100%; object-fit: cover; }
     .chat-bubble-content { 
-        max-width: 85% !important; /* 移动端气泡占比提高，避免留白 */
-        padding: 12px 16px !important; /* 收紧气泡内边距 */
-        border-radius: 18px !important;
-        font-size: 14px !important; /* 移动端小字，适配小屏 */
-        line-height: 1.4;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        max-width: 72% !important;
+        padding: 12px 18px !important;
+        border-radius: 20px !important;
+        font-size: 15px !important;
+        line-height: 1.5;
         position: relative;
-        word-wrap: break-word !important; /* 强制换行，避免长文本撑宽 */
-        word-break: break-all !important;
+        word-wrap: break-word !important;
+        word-break: break-word !important;
     }
     .chat-bubble-other { 
-        background-color: #FFFFFF; 
-        border: 1px solid #E5E7EB;
+        background-color: #000000 !important; 
+        color: #FFFFFF !important; 
+        border: 1px solid #000000 !important; 
         border-bottom-left-radius: 4px !important;
-        color: #111827;
     }
     .chat-bubble-me { 
-        background-color: #3B82F6;
-        color: #FFFFFF;
+        background-color: #FFFFFF !important; 
+        color: #000000 !important;
+        border: 1px solid #000000 !important; 
         border-bottom-right-radius: 4px !important;
     }
+    .message-time { font-size: 11px !important; color: #8E8E8E !important; margin-top: 6px !important; text-align: right !important; }
+    .chat-bubble-row.me .message-time { color: #8E8E8E !important; }
+    .chat-bubble-row:not(.me) .message-time { color: rgba(255,255,255,0.6) !important; }
     
-    /* 5. 朋友圈卡片 - 移动端适配 */
+    /* 4. 朋友圈 / 发现 */
     .moment-card { 
-        background: transparent; 
-        padding: 10px 0 14px 0 !important; 
+        background: #FFFFFF !important; 
+        padding: 20px !important; 
         border-radius: 0; 
-        margin-bottom: 0; 
-        border-bottom: 1px solid #E5E7EB;
-        box-shadow: none;
+        margin-bottom: 12px !important; 
+        border-bottom: 1px solid #EFEFEF;
+        border-top: 1px solid #EFEFEF;
         width: 100% !important;
     }
     .comment-area { 
@@ -307,129 +194,140 @@ st.markdown("""
     }
     .comment-item { 
         padding: 6px 0 !important; 
-        border-bottom: 1px solid #E5E5E5;
+        border-bottom: 1px solid #EFEFEF;
         line-height: 1.4;
         word-wrap: break-word !important;
     }
     .comment-item:last-child { border-bottom: none; }
-    .comment-user { 
-        color: #576B95; 
-        font-weight: 500; 
-        margin-right: 4px; 
-    }
-    /* 6. 普通按钮 - 保留原设计 */
+    .comment-user { color: #262626; font-weight: 600; margin-right: 6px; }
+    /* 5. 通用按钮 - 极简 */
     .stButton>button { 
-        border-radius: 0 !important; 
+        border-radius: 8px !important; 
         text-align: left !important;
         justify-content: flex-start !important;
-        padding: 6px 0 !important;
+        padding: 8px 12px !important;
         background-color: transparent !important;
         border: none !important;
         box-shadow: none !important;
-        color: #111827 !important;
+        color: #000000 !important;
+        transition: background 0.2s ease !important;
     }
-    .stButton>button:hover { background-color: #F9FAFB !important; }
-    /* 8. 转账卡片 - 移动端适配，避免撑宽 */
+    .stButton>button:hover { background-color: #FAFAFA !important; }
+    /* 6. 转账卡片 - Ins 黑/白主题 */
     .transfer-card {
-        background: linear-gradient(135deg, #F59E0B, #FBBF24);
+        background: #000000 !important;
         border-radius: 16px !important;
-        padding: 10px 14px !important;
-        min-width: 180px !important; /* 减小最小宽度 */
-        max-width: 90% !important; /* 最大宽度不超过90%屏幕 */
-        color: #FFFFFF;
+        padding: 12px 16px !important;
+        min-width: 200px !important;
+        max-width: 280px !important;
+        color: #FFFFFF !important;
         display: flex;
         flex-direction: column;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        border: 1px solid #000000;
         word-wrap: break-word !important;
     }
+    .chat-bubble-row.me .transfer-card { background: #FFFFFF !important; color: #000000 !important; border-color: #000000 !important; }
     .transfer-title { font-size: 11px !important; opacity: 0.9; margin-bottom: 2px; }
     .transfer-amount { font-size: 20px !important; font-weight: 700; margin: 4px 0; }
     .transfer-note { font-size: 12px !important; opacity: 0.95; margin-bottom: 4px; }
     .transfer-status { font-size: 10px !important; margin-top: 4px; opacity: 0.9; text-align: right; }
-    .transfer-card.received {
-        background: linear-gradient(135deg, #FEF3C7, #FDE68A);
-        color: #92400E;
-    }
-    /* 9. 登录/注册页面 - 移动端适配 */
+    .transfer-card.received { background: #F0F0F0 !important; color: #262626 !important; border-color: #DBDBDB !important; }
+    /* 7. 登录/注册 */
     .auth-container { 
         max-width: 100vw !important; 
         width: 90% !important;
         margin: 0 auto !important;
-        padding: 20px 10px !important; /* 收紧登录页内边距 */
+        padding: 24px 16px !important;
     }
-    .auth-title { font-size: 24px !important; font-weight: 700; color: #111827; margin-bottom: 8px; }
-    .auth-subtitle { color: #6B7280; margin-bottom: 20px !important; font-size: 14px !important; }
-    /* 11. 收款按钮 - 移动端适配 */
+    .auth-title { font-size: 26px !important; font-weight: 700 !important; color: #000000 !important; margin-bottom: 8px !important; }
+    .auth-subtitle { color: #8E8E8E !important; margin-bottom: 24px !important; font-size: 14px !important; }
+    /* 8. 消息列表项 */
+    .chat-item {
+        display: flex;
+        align-items: center;
+        padding: 16px !important;
+        background: #FFFFFF !important;
+        border-bottom: 1px solid #FAFAFA !important;
+        transition: background 0.2s ease;
+        cursor: pointer;
+        width: 100% !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+    }
+    .chat-item:hover { background-color: #FAFAFA !important; }
+    .chat-list-container { padding-top: 8px !important; }
+    .chat-avatar-wrap { position: relative; margin-right: 12px; flex-shrink: 0; }
+    .chat-avatar-wrap img { width: 48px !important; height: 48px !important; border-radius: 50% !important; object-fit: cover !important; }
+    .online-indicator { display: none; }
+    .chat-content { flex: 1; min-width: 0; }
+    .chat-name-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .chat-name { font-size: 16px !important; font-weight: 600 !important; color: #000000 !important; }
+    .chat-time { font-size: 12px !important; color: #8E8E8E !important; }
+    .chat-preview { font-size: 13px !important; color: #8E8E8E !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .unread-badge { background: #ED4956; color: #FFF; font-size: 11px; padding: 2px 6px; border-radius: 10px; }
+    .chat-arrow .stButton>button {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        width: 32px !important;
+        height: 32px !important;
+        padding: 0 !important;
+        border-radius: 50% !important;
+        font-size: 18px !important;
+        color: #8E8E8E !important;
+    }
+    .chat-arrow .stButton>button:hover { background: #EFEFEF !important; color: #262626 !important; }
     .receive-btn {
-        background-color: #FFFFFF !important;
-        color: #F59E0B !important;
-        border: 1px solid #F59E0B !important;
-        border-radius: 6px !important;
-        padding: 3px 10px !important;
-        font-size: 12px !important;
-        margin-top: 6px !important;
-        width: auto !important;
+        background: #000000 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #000000 !important;
+        border-radius: 20px !important;
+        padding: 8px 16px !important;
+        font-size: 13px !important;
+        margin-top: 8px !important;
     }
-    /* 12. 发现页互动工具栏 - 移动端适配 */
     .interaction-toolbar {
         display: flex;
         align-items: center;
-        justify-content: flex-start;
-        gap: 8px !important; /* 收紧工具栏间距 */
+        gap: 12px !important;
         margin-top: 10px !important;
         margin-bottom: 12px !important;
         width: 100% !important;
-        overflow-x: auto !important; /* 允许横向滚动，避免按钮挤压 */
+        overflow-x: auto !important;
         padding-bottom: 4px !important;
     }
-    .interaction-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 5px 12px !important;
-        border-radius: 6px !important;
-        background-color: #F9FAFB;
-        border: 1px solid #E5E7EB;
-        font-size: 12px !important;
-        color: #6B7280;
-        min-width: 70px !important; /* 减小最小宽度 */
-        height: 28px !important;
-        text-align: center;
-        flex-shrink: 0; /* 按钮不收缩 */
-    }
-    .interaction-toolbar .stButton>button {
-        min-width: 70px !important;
-        height: 28px !important;
-        padding: 5px 12px !important;
-        border-radius: 6px !important;
-        background-color: #F9FAFB !important;
-        border: 1px solid #E5E7EB !important;
-        font-size: 12px !important;
-        color: #6B7280 !important;
+    .interaction-toolbar .stButton>button, .interaction-btn {
+        min-width: 64px !important;
+        height: 32px !important;
+        padding: 6px 14px !important;
+        border-radius: 8px !important;
+        background: #FAFAFA !important;
+        border: 1px solid #DBDBDB !important;
+        font-size: 13px !important;
+        color: #262626 !important;
         text-align: center !important;
         justify-content: center !important;
-        flex-shrink: 0;
     }
     .comment-input-container {
         margin-top: 8px !important;
         padding-top: 8px !important;
-        border-top: 1px solid #F3F4F6;
+        border-top: 1px solid #EFEFEF;
         display: flex;
         align-items: center;
-        gap: 6px !important;
+        gap: 8px !important;
         width: 100% !important;
     }
     .comment-input { flex: 1; }
     .comment-send-btn {
-        width: 50px !important; /* 减小发送按钮宽度 */
-        padding: 5px 0 !important;
-        border-radius: 6px !important;
-        background-color: #3B82F6 !important;
-        color: white !important;
+        min-width: 56px !important;
+        padding: 8px 12px !important;
+        border-radius: 20px !important;
+        background: #000000 !important;
+        color: #FFFFFF !important;
         text-align: center !important;
         justify-content: center !important;
     }
-    /* 消息列表：摘要单行、与昵称左对齐 */
     .chat-list-item .stButton>button {
         padding: 0 !important;
         margin: 0 !important;
@@ -438,67 +336,122 @@ st.markdown("""
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
-        font-size: 13px !important; /* 移动端小字 */
-        color: #6B7280 !important;
+        font-size: 13px !important;
+        color: #8E8E8E !important;
         font-weight: normal !important;
-        padding-left: 0 !important;
-        margin-left: 0 !important;
         border-radius: 0 !important;
     }
-    
-    /* 记忆库展示样式 - 移动端适配 */
     .memory-bank-info {
-        background: #F0F9FF;
-        border: 1px solid #BAE6FD;
-        border-radius: 6px !important;
-        padding: 8px 12px !important;
+        background: #EFEFEF;
+        border: 1px solid #DBDBDB;
+        border-radius: 12px !important;
+        padding: 10px 14px !important;
         margin: 8px 0 !important;
-        font-size: 12px !important;
-        color: #0369A1;
+        font-size: 13px !important;
+        color: #262626;
         width: 100% !important;
     }
     .memory-item {
-        background: #F9FAFB;
-        border-radius: 4px !important;
-        padding: 6px 10px !important;
+        background: #FAFAFA;
+        border-radius: 8px !important;
+        padding: 8px 12px !important;
         margin: 4px 0 !important;
-        font-size: 12px !important;
-        color: #374151;
-        border-left: 3px solid #3B82F6;
+        font-size: 13px !important;
+        color: #262626;
+        border-left: 3px solid #000000;
         width: 100% !important;
         word-wrap: break-word !important;
     }
+    /* 空状态 */
+    .empty-state {
+        text-align: center;
+        padding: 60px 24px;
+        color: #8E8E8E;
+    }
+    .empty-icon { font-size: 48px !important; margin-bottom: 16px !important; opacity: 0.8; }
+    .empty-title { font-size: 17px !important; font-weight: 600 !important; color: #262626 !important; margin-bottom: 8px !important; }
+    .empty-desc { font-size: 14px !important; color: #8E8E8E !important; }
+    /* 聊天页固定区域 */
+    .chat-messages-container {
+        padding: 16px 12px !important;
+        background: #FAFAFA !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .chat-input-fixed {
+        background: #FFFFFF !important;
+        border-top: 1px solid #DBDBDB !important;
+        padding: 12px 16px !important;
+    }
+    .chat-input-fixed .stChatInput > div {
+        background: #FAFAFA !important;
+        border: 1px solid #DBDBDB !important;
+        border-radius: 24px !important;
+        padding: 8px 16px !important;
+        min-height: 44px !important;
+    }
+    .typing-dots {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        padding: 12px 18px;
+    }
+    .typing-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #8E8E8E;
+        animation: typingBounce 1.4s ease-in-out infinite both;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingBounce { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
 
-    /* ===== 超小屏优化（iPhone SE/小屏安卓）===== */
-    @media (max-width: 375px) {
-        .block-container {
-            padding-left: 4px !important;
-            padding-right: 4px !important;
-        }
-        .chat-bubble-content {
-            max-width: 88% !important;
-            padding: 10px 12px !important;
-            font-size: 13px !important;
-        }
-        .transfer-card {
-            min-width: 160px !important;
-            padding: 8px 12px !important;
-        }
-        .transfer-amount {
-            font-size: 18px !important;
-        }
+    /* 创建角色按钮：黑底白字 */
+    .new-char-form-marker ~ form button,
+    .new-char-form-marker + form button {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        border: 1px solid #000000 !important;
+    }
+    .new-char-form-marker ~ form button:hover,
+    .new-char-form-marker + form button:hover {
+        background-color: #262626 !important;
+        color: #ffffff !important;
     }
 
-    /* 突破 Streamlit 的手机端限制，强制横向排列 + 底部栏压扁 */
-    @media (max-width: 768px) {
-        [data-testid="stHorizontalBlock"] {
-            flex-wrap: nowrap !important;
-            flex-direction: row !important;
-        }
-        [data-testid="column"] {
-            width: 100% !important;
-            flex: 1 1 0% !important;
-        }
+    /* 发现页 发表/取消：黑底白字 */
+    .new-post-form-marker ~ form button,
+    .new-post-form-marker + form button {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        border: 1px solid #000000 !important;
+    }
+    .new-post-form-marker ~ form button:hover,
+    .new-post-form-marker + form button:hover {
+        background-color: #262626 !important;
+        color: #ffffff !important;
+    }
+
+    /* 个人中心 保存设置/修改密码/退出登录：黑底白字 */
+    .profile-form-marker ~ form button,
+    .profile-form-marker + form button {
+        background-color: #000000 !important;
+        color: #ffffff !important;
+        border: 1px solid #000000 !important;
+    }
+    .profile-form-marker ~ form button:hover,
+    .profile-form-marker + form button:hover {
+        background-color: #262626 !important;
+        color: #ffffff !important;
+    }
+
+    @media (max-width: 375px) {
+        .block-container { padding-left: 4px !important; padding-right: 4px !important; }
+        .chat-bubble-content { max-width: 85% !important; padding: 10px 14px !important; font-size: 14px !important; }
+        .chat-item { padding: 12px !important; }
+        .transfer-card { min-width: 160px !important; padding: 10px 14px !important; }
+        .transfer-amount { font-size: 18px !important; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -514,10 +467,10 @@ supabase = init_supabase()
 # 持久登录 Cookie：同一设备只需登录一次，关闭浏览器后再打开仍保持登录（除非主动退出）
 from streamlit_cookies_manager import EncryptedCookieManager
 try:
-    _cookie_secret = getattr(st.secrets, "COOKIES_PASSWORD", None) or os.environ.get("COOKIES_PASSWORD", "echoem-remember-secret")
+    _cookie_secret = getattr(st.secrets, "COOKIES_PASSWORD", None) or os.environ.get("COOKIES_PASSWORD", "narratio-remember-secret")
 except Exception:
-    _cookie_secret = os.environ.get("COOKIES_PASSWORD", "echoem-remember-secret")
-cookies = EncryptedCookieManager(prefix="echoem/", password=_cookie_secret)
+    _cookie_secret = os.environ.get("COOKIES_PASSWORD", "narratio-remember-secret")
+cookies = EncryptedCookieManager(prefix="narratio/", password=_cookie_secret)
 if not cookies.ready():
     st.stop()
 
@@ -587,7 +540,7 @@ def get_avatar_display(avatar_data, default_emoji):
 
 def get_avatar_html(avatar_data):
     """根据头像数据返回用于消息列表的 HTML 片段"""
-    av = get_avatar_display(avatar_data, "🪽")
+    av = get_avatar_display(avatar_data, "📜")
     if isinstance(av, str) and av.startswith("http"):
         return f'<img src="{av}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">'
     else:
@@ -634,6 +587,10 @@ def build_system_prompt(char, scene: str = "chat") -> str:
     user_self = st.session_state.user_profile.get("self_persona", "") if "user_profile" in st.session_state else ""
     if user_self:
         parts.append(f"【对话对象设定】\n{user_self}")
+    # 好感度：0-100，影响角色对对方的语气与态度
+    fav = int(char.get("favorability", 30))
+    fav_desc = "冷淡、疏离" if fav < 30 else "一般、客气" if fav < 60 else "亲近、信任"
+    parts.append(f"【当前好感度】数值：{fav}（0-100）。含义：{fav_desc}。请根据当前好感度调整你对对方的语气、亲密度和态度，数值越高越亲近自然，越低越保持距离或冷淡。")
     if scene == "moment":
         parts.append("【当前场景】你正在朋友圈的评论区，用轻松、简短的语气回复对方的动态。对方刚刚回复了你，你需要针对这条回复做出回应。")
     else:
@@ -792,35 +749,43 @@ def update_memory_bank(char, user_msg, ai_response):
     
     char["memory_bank"] = memory_bank
 
+def compute_favorability_change(char, user_msg, ai_response):
+    """由 AI 判断本次对话是否导致好感度变化，返回 -5～5 的增量（重大事项可超出），无需变化则返回 0。"""
+    api_key, model, base_url = get_api_info(char)
+    if not api_key:
+        return 0
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        fav = int(char.get("favorability", 30))
+        prompt = f"""你是{char['name']}的内心评判。仅根据下面这一轮对话，判断你对对方的「好感度」是否变化。
+【当前好感度】{fav}（0-100）
+【对方刚说】{user_msg}
+【你刚回复】{ai_response}
+
+规则：
+- 不必每轮都变化，多数日常对话可不变（输出 0）。
+- 若有变化：一般情况每次变化在 -5 到 +5 之间；只有重大事件（如背叛、深情告白、严重冒犯等）才可超出 ±5。
+- 输出严格为一行 JSON，不要其他内容。格式：{{"change": 数字}}
+例如：{{"change": 0}} 或 {{"change": 2}} 或 {{"change": -3}}"""
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        if "```" in raw:
+            raw = re.sub(r"```\w*\n?", "", raw).strip()
+        obj = json.loads(raw)
+        delta = int(obj.get("change", 0))
+        return max(-20, min(20, delta))  # 单次最多 ±20 兜底
+    except Exception:
+        return 0
+
 # ===================== 2. 身份验证 =====================
-
-def _is_network_or_ssl_error(e):
-    """判断是否为网络/SSL 连接类错误（Supabase 请求失败时友好提示）"""
-    if isinstance(e, ssl.SSLError):
-        return True
-    if httpx and isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)):
-        return True
-    msg = str(e).lower()
-    return "ssl" in msg or "eof" in msg or "connection" in msg or "connect" in msg
-
-def _supabase_request_with_retry(request_fn, max_attempts=2):
-    """执行 Supabase 请求，失败时重试一次（应对瞬时 SSL/网络中断）"""
-    last_err = None
-    for attempt in range(max_attempts):
-        try:
-            return request_fn()
-        except Exception as e:
-            last_err = e
-            if _is_network_or_ssl_error(e) and attempt < max_attempts - 1:
-                time.sleep(1.5)
-                continue
-            raise
-    if last_err is not None:
-        raise last_err
 
 def try_restore_session_from_cookie():
     """从持久化 Cookie 恢复登录状态（同一设备再次打开网页时免登录）"""
-    val = cookies.get("echoem_login")
+    val = cookies.get("narratio_login")
     if not val:
         return False
     try:
@@ -830,14 +795,7 @@ def try_restore_session_from_cookie():
         username = data.get("username")
         if not username:
             return False
-        try:
-            res = _supabase_request_with_retry(
-                lambda: supabase.table("user_data").select("*").eq("username", username).execute()
-            )
-        except Exception as e:
-            if _is_network_or_ssl_error(e):
-                return False  # 静默失败，让用户重新登录
-            raise
+        res = supabase.table("user_data").select("*").eq("username", username).execute()
         if not res.data:
             return False
         row = res.data[0]
@@ -845,6 +803,7 @@ def try_restore_session_from_cookie():
         for char in characters:
             if "memory_bank" not in char:
                 char["memory_bank"] = {"core_memories": [], "recent_context": []}
+            char.setdefault("favorability", 30)
         st.session_state.update({
             "password_correct": True,
             "username": username,
@@ -869,8 +828,8 @@ def check_password():
         st.markdown("""
         <div class="auth-container">
             <div style="text-align:center;">
-                <h1 class="auth-title">🪽 Echoem</h1>
-                <p class="auth-subtitle">AI 伴侣聊天空间</p>
+                <h1 class="auth-title">📜 Narratio</h1>
+                <p class="auth-subtitle">Narratio 聊天空间</p>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -882,18 +841,16 @@ def check_password():
             p = st.text_input("密码", type="password", key="l_p", placeholder="请输入你的密码")
             if st.button("进入", use_container_width=True, type="primary"):
                 try:
-                    res = _supabase_request_with_retry(
-                        lambda: supabase.table("user_data").select("*").eq("username", u).execute()
+                    res = supabase.table("user_data").select("*").eq("username", u).execute()
+                except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
+                    st.error(
+                        "无法连接至 Supabase 服务器（连接被拒绝或超时）。请检查：\n\n"
+                        "1. `.streamlit/secrets.toml` 中的 `SUPABASE_URL` 是否填写正确；\n"
+                        "2. 本机网络是否正常、是否需要代理；\n"
+                        "3. Supabase 服务是否可用。"
                     )
-                except Exception as e:
-                    if _is_network_or_ssl_error(e):
-                        st.error("无法连接服务器，请检查网络或稍后重试。若使用代理，请确认 SSL 正常。")
-                    else:
-                        raise
-                    res = None
-                if res is None:
-                    pass  # 已展示网络错误
-                elif res.data and verify_password(p, res.data[0]["password_hash"]):
+                    st.stop()
+                if res.data and verify_password(p, res.data[0]["password_hash"]):
                     # 数据迁移：为旧角色添加memory_bank
                     characters = res.data[0]["characters"] or []
                     for char in characters:
@@ -902,9 +859,10 @@ def check_password():
                                 "core_memories": [],
                                 "recent_context": []
                             }
+                        char.setdefault("favorability", 30)
                     # 持久登录：写入 Cookie，30 天内同一设备免登录
                     login_payload = json.dumps({"username": u, "exp": time.time() + 30 * 24 * 3600})
-                    cookies["echoem_login"] = login_payload
+                    cookies["narratio_login"] = login_payload
                     cookies.save()
                     st.session_state.update({
                         "password_correct":True, 
@@ -914,7 +872,7 @@ def check_password():
                         "moments":res.data[0]["moments"] or []
                     })
                     st.rerun()
-                else:
+                else: 
                     st.error("账号或密码错误", icon="❌")
             st.markdown("</div>", unsafe_allow_html=True)
             
@@ -933,27 +891,27 @@ def check_password():
                         st.error("账号名只能包含英文字母和数字", icon="❌")
                     else:
                         try:
-                            res = _supabase_request_with_retry(
-                                lambda: supabase.table("user_data").select("username").eq("username", nu).execute()
-                            )
-                            if res.data:
-                                st.error("该账号已存在", icon="❌")
-                            else:
+                            res = supabase.table("user_data").select("username").eq("username", nu).execute()
+                        except (httpx.ConnectError, httpx.ConnectTimeout, OSError):
+                            st.error("无法连接至 Supabase 服务器，请检查 SUPABASE_URL 与网络后重试。")
+                            st.stop()
+                        if res.data:
+                            st.error("该账号已存在", icon="❌")
+                        else:
+                            try:
                                 supabase.table("user_data").insert({
-                                    "username":nu, 
-                                    "password_hash":hash_password(np), 
-                                    "profile":{"nickname":nu,"avatar":None,"global_api_key":"","global_provider":"deepseek","global_model":"deepseek-chat"}, 
-                                    "characters":[], 
-                                    "moments":[]
+                                    "username": nu,
+                                    "password_hash": hash_password(np),
+                                    "profile": {"nickname": nu, "avatar": None, "global_api_key": "", "global_provider": "deepseek", "global_model": "deepseek-chat"},
+                                    "characters": [],
+                                    "moments": []
                                 }).execute()
-                                st.success("注册成功，请至登录页进入账号...", icon="✅")
-                                time.sleep(1)
-                                st.rerun()
-                        except Exception as e:
-                            if _is_network_or_ssl_error(e):
-                                st.error("无法连接服务器，请检查网络或稍后重试。若使用代理，请确认 SSL 正常。")
-                            else:
-                                raise
+                            except (httpx.ConnectError, httpx.ConnectTimeout, OSError):
+                                st.error("无法连接至 Supabase 服务器，请检查 SUPABASE_URL 与网络后重试。")
+                                st.stop()
+                            st.success("注册成功，请至登录页进入账号...", icon="✅")
+                            time.sleep(1)
+                            st.rerun()
                 else:
                     st.warning("账号和密码不能为空", icon="⚠️")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -998,7 +956,7 @@ def get_api_info(char):
     mod = char.get("model") or st.session_state.user_profile.get("global_model") or provider["default_model"]
     return key, mod, provider["base_url"]
 
-if "active_tab" not in st.session_state: st.session_state.active_tab = "Echoem"
+if "active_tab" not in st.session_state: st.session_state.active_tab = "Narratio"
 if "view_mode" not in st.session_state: st.session_state.view_mode = "main"
 if "reply_to_comment" not in st.session_state: st.session_state.reply_to_comment = {}
 if "nav_drawer_open" not in st.session_state: st.session_state.nav_drawer_open = False
@@ -1087,50 +1045,63 @@ def handle_moment_interaction(moment, user_text, target_char_name=None, reply_to
 # ===================== 5. 页面渲染 =====================
 
 def render_chat_list_page():
-    st.markdown("<h3 style='text-align:center; margin:10px 0;'>消息</h3>", unsafe_allow_html=True)
-    display_chars = st.session_state.characters or []
+    st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>消息</h3>", unsafe_allow_html=True)
+
     # 类微信：按最近消息条数近似排序（真实项目可存 timestamp）
     def last_ts(c):
         return len(c.get("messages", []))
-    display_chars = sorted(display_chars, key=last_ts, reverse=True)
+
+    display_chars = sorted(st.session_state.characters, key=last_ts, reverse=True)
 
     if not display_chars:
         st.markdown("""
-        <div style='text-align:center; padding:60px 20px; color:#6B7280;'>
-            <p style='font-size:16px;'>暂无聊天对象</p>
-            <p style='font-size:14px; margin-top:8px;'>前往「通讯录」添加 AI 角色开始聊天吧</p>
+        <div class="empty-state">
+            <div class="empty-icon">💬</div>
+            <div class="empty-title">暂无聊天对象</div>
+            <div class="empty-desc">前往「通讯录」添加 AI 角色开始聊天吧</div>
         </div>
         """, unsafe_allow_html=True)
         return
+    
+    # 预先整理每个角色的最后一条消息，用于摘要展示
+    last_msgs = {}
+    for c in display_chars:
+        msgs = c.get("messages", [])
+        last = msgs[-1]["content"] if msgs else "暂无消息"
+        last_msgs[c["id"]] = (last or "暂无消息").replace("\n", " ").strip()
 
+    # 渲染消息列表：左侧纯展示，右侧小箭头按钮负责跳转
     for char in display_chars:
-        # 使用 st.container() 将视觉层和按钮包裹在一个独立的区块中
-        with st.container():
-            avatar_html = get_avatar_html(char.get("avatar"))
-            last_msg = (char.get("messages", [])[-1]["content"] if char.get("messages") else "暂无消息")[:18]
-            last_msg = html.escape(str(last_msg))
-            safe_name = html.escape(char["name"])
+        last_msg = last_msgs.get(char["id"], "暂无消息")
+        safe_name = html.escape(char["name"])
+        safe_last_msg = html.escape(last_msg)
+        avatar_html = get_avatar_html(char.get("avatar"))
 
-            # --- 视觉层 HTML ---
-            st.markdown(f"""
-            <div class="chat-item-wrapper">
-                <div style="display: flex; align-items: center; padding: 0 16px; background: #FFFFFF; border-bottom: 0.5px solid #E5E5E7; width: 100%; height: 72px; box-sizing: border-box; pointer-events: none;">
-                    <div style="margin-right: 12px;">{avatar_html}</div>
-                    <div style="flex-grow: 1; overflow: hidden;">
-                        <div style="font-size: 16px; font-weight: 500; color: #1a1a1a; text-align: left;">{safe_name}</div>
-                        <div style="font-size: 13px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;">
-                            {last_msg}
-                        </div>
-                    </div>
+        # 左右布局：左侧纯展示，右侧是紧凑的小箭头按钮
+        chat_html = f"""
+        <div class="chat-item">
+            <div style="display: flex; align-items: center; width: 100%;">
+                <div style="flex-shrink: 0; margin-right: 12px;">
+                    {avatar_html}
+                </div>
+                <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                    <div style="font-size:16px; font-weight:600; color:#000000; line-height:1.4; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{safe_name}</div>
+                    <div style="font-size:13px; color:#8E8E8E; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">{safe_last_msg}</div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """
 
-            # --- 交互层 透明按钮 ---
-            if st.button("进入", key=f"btn_{char['id']}", help=f"jump_{char['id']}", use_container_width=True):
+        col1, col2 = st.columns([0.9, 0.1])
+        with col1:
+            st.markdown(chat_html, unsafe_allow_html=True)
+        with col2:
+            st.markdown('<div class="chat-arrow" style="display:flex;align-items:center;justify-content:center;height:100%;">', unsafe_allow_html=True)
+            if st.button("›", key=f"go_{char['id']}", help=f"与 {char['name']} 聊天", use_container_width=True):
                 st.session_state.current_char_id = char["id"]
                 st.session_state.view_mode = "chat"
                 st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
 def render_chat_session():
     char = get_current_char()
@@ -1151,27 +1122,48 @@ def render_chat_session():
         }}
         </style>''', unsafe_allow_html=True)
 
-    # 头部导航栏（仅昵称 + 下拉菜单，无返回键）
-    col1, col2 = st.columns([6, 1])
-    with col1:
-        safe_char_name = safe_text(char["name"])
-        with st.popover(safe_char_name, use_container_width=True):
-            if st.button("🔙返回消息列表", use_container_width=True):
+    # 聊天头部：仅保留可点击昵称，点击展开下拉菜单（返回 / 设置）
+    st.markdown(
+        "<script>document.body.classList.add('chat-view');</script><div class=\"chat-header-marker\" aria-hidden=\"true\"></div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<style>"
+        "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) { "
+        "width: 100% !important; display: flex !important; justify-content: center !important; align-items: center !important; "
+        "padding: 4px 0 6px 0 !important; min-height: 0 !important; "
+        "}"
+        "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) [data-testid=\"column\"] { "
+        "display: flex !important; justify-content: center !important; align-items: center !important; padding: 0 4px !important; "
+        "}"
+        "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) .stPopover > button { "
+        "background: transparent !important; border: none !important; box-shadow: none !important; "
+        "font-size: 15px !important; font-weight: 600 !important; color: #000000 !important; "
+        "padding: 6px 10px !important; border-radius: 8px !important; "
+        "}"
+        "body.chat-view [data-testid=\"stHorizontalBlock\"]:has(.stPopover) .stPopover > button:hover { background: #FAFAFA !important; }"
+        "</style>",
+        unsafe_allow_html=True
+    )
+    col_left, col_center, col_right = st.columns([1, 1, 1])
+    with col_left:
+        st.write("")
+    with col_center:
+        with st.popover(char.get("name", "聊天")):
+            if st.button("🔙 返回消息列表", key="chat_header_back", use_container_width=True):
                 st.session_state.view_mode = "main"
-                st.session_state.current_char_id = None
                 st.rerun()
-            if st.button("⚙️修改人物设定", use_container_width=True):
+            if st.button("⚙️ 设置人物详情", key="chat_header_settings", use_container_width=True):
                 st.session_state.view_mode = "edit_char"
                 st.rerun()
-    with col2:
-        st.markdown("<div style='text-align:right;'></div>", unsafe_allow_html=True)
-
-    st.markdown("<hr style='margin: 5px 0 15px 0;'/>", unsafe_allow_html=True)
-    typing_placeholder = st.empty()
+        typing_placeholder = st.empty()
+    with col_right:
+        st.write("")
+    st.markdown("<hr style='margin:2px 0 4px 0; border:none; border-top:1px solid #DBDBDB;'/>", unsafe_allow_html=True)
     
     # 消息循环
     user_av = get_avatar_display(st.session_state.user_profile.get("avatar"), "👤")
-    char_av = get_avatar_display(char.get("avatar"), "🪽")
+    char_av = get_avatar_display(char.get("avatar"), "📜")
     
     # 空消息提示
     if not char.get("messages", []):
@@ -1304,6 +1296,11 @@ def render_chat_session():
                     # 更新记忆库（在显示之前完成）
                     user_msg = char["messages"][-1]["content"]
                     update_memory_bank(char, user_msg, raw)
+                    # 好感度：由 AI 判断本轮是否增减
+                    delta = compute_favorability_change(char, user_msg, raw)
+                    if delta != 0:
+                        fav = int(char.get("favorability", 30))
+                        char["favorability"] = max(0, min(100, fav + delta))
                     
                     # 支持转账写法：
                     # 1）标准指令：转账卡|金额=XXX|备注=...
@@ -1413,7 +1410,7 @@ def render_edit_persona():
         st.rerun()
         return
         
-    st.markdown(f"<h3 style='margin:10px 0 20px 0; color:#111827;'>编辑 {char['name']}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>编辑 {char['name']}</h3>", unsafe_allow_html=True)
     
     # 优化表单布局
     col1, col2 = st.columns(2)
@@ -1435,6 +1432,17 @@ def render_edit_persona():
     char['persona'] = st.text_area("人设 (Prompt)", char['persona'], height=150, placeholder="请详细描述角色的性格、语气、背景等")
     char['memory'] = st.text_area("核心记忆（手动设置）", char.get('memory',''), height=100, placeholder="角色需要记住的关键信息（AI自动提取的记忆会显示在下方）")
     
+    # 好感度条：0-100，初始 30，聊天中由 AI 酌情增减，用户可在此手动调节
+    fav = int(char.get("favorability", 30))
+    char["favorability"] = st.slider(
+        "好感度",
+        min_value=0,
+        max_value=100,
+        value=fav,
+        step=1,
+        help="当前角色对你的好感度（0-100）。聊天过程中会随剧情由 AI 自动微调，也可在此手动调节。"
+    )
+    
     # 显示AI自动维护的记忆库
     memory_bank = char.get("memory_bank", {})
     core_memories = memory_bank.get("core_memories", [])
@@ -1453,77 +1461,69 @@ def render_edit_persona():
         if recent_context:
             with st.expander(f"📝 最近 {len(recent_context)} 条对话上下文（点击查看）"):
                 for ctx in recent_context:
-                    role = "👤" if ctx["role"] == "user" else "🪽"
+                    role = "👤" if ctx["role"] == "user" else "📜"
                     content = ctx.get("content", "")[:50]
                     st.markdown(f"{role} {content}...")
     
-    # 头像/背景定制保留（优化布局）
+    # 头像 / 背景 / 操作按钮 纵向排列
     st.markdown("<div style='margin:20px 0;'>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("头像设置", divider="gray")
-        # 预览当前头像
-        current_av = get_avatar_display(char.get("avatar"), "🪽")
-        if isinstance(current_av, str) and current_av.startswith("http"):
-            st.image(current_av, width=80)
-        else:
-            st.markdown(f"<div style='width:80px;height:80px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:40px;'>{current_av}</div>", unsafe_allow_html=True)
-        
-        new_av = st.file_uploader("更换头像", type=['png','jpg'], key="avatar_upload")
-        if st.button("保存头像", key="save_avatar", use_container_width=True):
-            if new_av: 
-                char['avatar'] = process_uploaded_image(new_av, (100,100))
-                save_cloud_data()
-                st.success("头像保存成功！", icon="✅")
-                time.sleep(1)
-                st.rerun()
     
-    with col2:
-        st.subheader("背景设置", divider="gray")
-        # 预览当前背景
-        if char.get('bg'):
-            st.image(char['bg'], width=150)
-        else:
-            st.markdown("<p style='color:#6B7280;'>暂无背景图</p>", unsafe_allow_html=True)
-        
-        new_bg = st.file_uploader("更换背景图", type=['png','jpg'], key="bg_upload")
-        if st.button("保存背景", key="save_bg", use_container_width=True):
-            if new_bg: 
-                char['bg'] = process_uploaded_image(new_bg, (1080,1920))
-                save_cloud_data()
-                st.success("背景保存成功！", icon="✅")
-                time.sleep(1)
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # 优化按钮布局
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("完成并返回", use_container_width=True, type="primary"): 
-            st.session_state.view_mode = "chat"
+    st.subheader("头像设置", divider="gray")
+    current_av = get_avatar_display(char.get("avatar"), "📜")
+    if isinstance(current_av, str) and current_av.startswith("http"):
+        st.image(current_av, width=80)
+    else:
+        st.markdown(f"<div style='width:80px;height:80px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:40px;'>{current_av}</div>", unsafe_allow_html=True)
+    new_av = st.file_uploader("更换头像", type=['png','jpg'], key="avatar_upload")
+    if st.button("保存头像", key="save_avatar", use_container_width=True):
+        if new_av:
+            char['avatar'] = process_uploaded_image(new_av, (100,100))
+            save_cloud_data()
+            st.success("头像保存成功！", icon="✅")
+            time.sleep(1)
             st.rerun()
-    with col2:
-        if st.button("删除角色", use_container_width=True, type="secondary"): 
-            # 二次确认
-            if st.checkbox("确认删除该角色（不可恢复）"):
-                st.session_state.characters.remove(char)
-                save_cloud_data()
-                st.session_state.view_mode = "main"
-                st.success("角色已删除", icon="✅")
-                time.sleep(1)
-                st.rerun()
+    
+    st.subheader("背景设置", divider="gray")
+    if char.get('bg'):
+        st.image(char['bg'], width=150)
+    else:
+        st.markdown("<p style='color:#8E8E8E;'>暂无背景图</p>", unsafe_allow_html=True)
+    new_bg = st.file_uploader("更换背景图", type=['png','jpg'], key="bg_upload")
+    if st.button("保存背景", key="save_bg", use_container_width=True):
+        if new_bg:
+            char['bg'] = process_uploaded_image(new_bg, (1080,1920))
+            save_cloud_data()
+            st.success("背景保存成功！", icon="✅")
+            time.sleep(1)
+            st.rerun()
+    
+    if st.button("完成并返回", use_container_width=True, type="primary"):
+        save_cloud_data()
+        st.session_state.view_mode = "chat"
+        st.rerun()
+    if st.button("删除角色", use_container_width=True, type="secondary"):
+        if st.checkbox("确认删除该角色（不可恢复）", key="confirm_delete_char"):
+            st.session_state.characters.remove(char)
+            save_cloud_data()
+            st.session_state.view_mode = "main"
+            st.success("角色已删除", icon="✅")
+            time.sleep(1)
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def render_moments_page():
-    st.markdown("<h3 style='text-align:center; margin:10px 0 20px 0; color:#111827;'>发现</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>发现</h3>", unsafe_allow_html=True)
     
     # 优化发布动态区域
     with st.expander("📷 发布新动态", expanded=False):
+        st.markdown('<div class="new-post-form-marker" aria-hidden="true"></div>', unsafe_allow_html=True)
         with st.form("new_post", clear_on_submit=True):
             txt = st.text_area("这一刻的想法...", height=100, placeholder="分享你的心情、想法或故事...")
             img = st.file_uploader("添加配图（可选）", type=['png','jpg','jpeg'])
             col1, col2 = st.columns([4,1])
             with col1:
-                submit = st.form_submit_button("发表", type="primary", use_container_width=True)
+                submit = st.form_submit_button("发表", use_container_width=True)
             with col2:
                 cancel = st.form_submit_button("取消", use_container_width=True)
             
@@ -1559,9 +1559,10 @@ def render_moments_page():
     
     if not moments:
         st.markdown("""
-        <div style='text-align:center; padding:60px 20px; color:#6B7280;'>
-            <p style='font-size:16px;'>暂无动态</p>
-            <p style='font-size:14px; margin-top:8px;'>发布一条动态，和好友互动吧</p>
+        <div class="empty-state">
+            <div class="empty-icon">🌍</div>
+            <div class="empty-title">暂无动态</div>
+            <div class="empty-desc">发布一条动态，和好友互动吧</div>
         </div>
         """, unsafe_allow_html=True)
         return
@@ -1584,10 +1585,10 @@ def render_moments_page():
         st.markdown('<div class="moment-card">', unsafe_allow_html=True)
         # 动态发布者信息
         safe_poster_name = safe_text(st.session_state.user_profile.get('nickname', ''))
-        st.markdown(f"<span style='color:#3B82F6; font-weight:600; font-size:16px;'>{safe_poster_name}</span>", unsafe_allow_html=True)
+        st.markdown(f"<span style='color:#000000; font-weight:600; font-size:16px;'>{safe_poster_name}</span>", unsafe_allow_html=True)
         # 动态内容
         safe_text_content = safe_text(m.get('text',''))
-        st.markdown(f"<p style='margin:12px 0; line-height:1.5; color:#111827;'>{safe_text_content}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='margin:12px 0; line-height:1.5; color:#262626;'>{safe_text_content}</p>", unsafe_allow_html=True)
         # 动态图片
         if m.get("image"):
             st.image(m["image"], use_column_width=True)
@@ -1678,7 +1679,7 @@ def render_moments_page():
         st.markdown('</div>', unsafe_allow_html=True)
 
 def render_contacts_page():
-    st.markdown("<h3 style='text-align:center; margin:10px 0 20px 0; color:#111827;'>通讯录</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>通讯录</h3>", unsafe_allow_html=True)
     
     # 展示现有角色
     if st.session_state.characters:
@@ -1687,14 +1688,14 @@ def render_contacts_page():
             st.markdown('<div style="padding:10px 0; border-bottom:1px solid #F3F4F6;">', unsafe_allow_html=True)
             col1, col2, col3 = st.columns([1, 3, 2])
             with col1:
-                av = get_avatar_display(char.get("avatar"), "🪽")
+                av = get_avatar_display(char.get("avatar"), "📜")
                 if isinstance(av, str) and av.startswith("http"):
                     st.markdown(f'<img src="{av}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div style="width:40px;height:40px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:20px;">{av}</div>', unsafe_allow_html=True)
             with col2:
                 safe_name = safe_text(char.get("name", ""))
-                st.markdown(f"<b style='font-size:15px; color:#111827;'>{safe_name}</b>", unsafe_allow_html=True)
+                st.markdown(f"<b style='font-size:15px; color:#000000;'>{safe_name}</b>", unsafe_allow_html=True)
             with col3:
                 if st.button("开始聊天", key=f"cont_{char['id']}", use_container_width=True, type="primary"): 
                     st.session_state.current_char_id = char['id']
@@ -1703,9 +1704,10 @@ def render_contacts_page():
             st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.markdown("""
-        <div style='text-align:center; padding:40px 20px; color:#6B7280;'>
-            <p style='font-size:16px;'>暂无 AI 好友</p>
-            <p style='font-size:14px; margin-top:8px;'>添加一个 AI 角色开始聊天吧</p>
+        <div class="empty-state">
+            <div class="empty-icon">👥</div>
+            <div class="empty-title">暂无 AI 好友</div>
+            <div class="empty-desc">添加一个 AI 角色开始聊天吧</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1713,6 +1715,7 @@ def render_contacts_page():
     
     # 添加新角色
     with st.expander("➕ 添加新 AI 角色", expanded=True):
+        st.markdown('<div class="new-char-form-marker" aria-hidden="true"></div>', unsafe_allow_html=True)
         with st.form("new_char", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -1726,7 +1729,7 @@ def render_contacts_page():
             p = st.text_area("角色人设", height=150, placeholder="详细描述角色的性格、语气、背景、说话方式等\n例如：温柔的邻家姐姐，说话亲切，喜欢用叠词，关心人的感受...")
             mem = st.text_area("核心记忆（选填）", height=80, placeholder="角色需要记住的关键信息\n例如：记住我的生日是10月1日，喜欢吃草莓蛋糕...")
             
-            if st.form_submit_button("创建角色", type="primary", use_container_width=True):
+            if st.form_submit_button("创建角色", use_container_width=True):
                 if n and p:
                     new_char = {
                         "id":uuid4().hex, 
@@ -1738,6 +1741,7 @@ def render_contacts_page():
                         "messages":[], 
                         "avatar":None, 
                         "bg":None,
+                        "favorability": 30,
                         "memory_bank": {
                             "core_memories": [],
                             "recent_context": []
@@ -1752,7 +1756,7 @@ def render_contacts_page():
                     st.warning("角色名称和人设不能为空", icon="⚠️")
 
 def render_profile_page():
-    st.markdown("<h3 style='text-align:center; margin:10px 0 20px 0; color:#111827;'>个人中心</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>个人中心</h3>", unsafe_allow_html=True)
     
     prof = st.session_state.user_profile
 
@@ -1768,11 +1772,12 @@ def render_profile_page():
             st.markdown(f"<img src='{av_display}' style='width:90px;height:90px;border-radius:50%;object-fit:cover;border:3px solid #F3F4F6;'>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div style='width:90px;height:90px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto;'>{av_display or '👤'}</div>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='margin:10px 0; color:#111827;'>{safe_nickname}</h4>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#6B7280; font-size:13px;'>账号：{safe_username}（不可修改）</p>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='margin:10px 0; color:#000000; font-weight:600;'>{safe_nickname}</h4>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#8E8E8E; font-size:13px;'>账号：{safe_username}（不可修改）</p>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     
     # 个人设置表单
+    st.markdown('<div class="profile-form-marker" aria-hidden="true"></div>', unsafe_allow_html=True)
     with st.form("profile_form", clear_on_submit=False):
         st.subheader("基本设置", divider="gray")
         prof["nickname"] = st.text_input("昵称", prof["nickname"], placeholder="修改你的显示昵称")
@@ -1833,7 +1838,7 @@ def render_profile_page():
         # 按钮区域
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.form_submit_button("保存设置", use_container_width=True, type="primary"): 
+            if st.form_submit_button("保存设置", use_container_width=True): 
                 save_cloud_data()
                 st.success("设置已同步到云端！", icon="✅")
         with col2:
@@ -1848,28 +1853,31 @@ def render_profile_page():
                     else:
                         st.error(msg, icon="❌")
         with col3:
-            if st.form_submit_button("退出登录", use_container_width=True, type="secondary"): 
-                if "echoem_login" in cookies:
-                    del cookies["echoem_login"]
+            if st.form_submit_button("退出登录", use_container_width=True): 
+                if "narratio_login" in cookies:
+                    del cookies["narratio_login"]
                     cookies.save()
                 st.session_state.clear()
                 st.rerun()
 
 # ===================== 6. 路由与固定导航 =====================
 
-NAV_ITEMS = [("💬 消息", "Echoem"), ("👥 通讯录", "通讯录"), ("🌍 发现", "发现"), ("👤 我", "我")]
+NAV_ITEMS = [("💬 消息", "Narratio"), ("👥 通讯录", "通讯录"), ("🌍 发现", "发现"), ("👤 我", "我")]
 
-# 左上角菜单按钮（仅图标，无旁边标题/索引）
-col_menu, _ = st.columns([0.1, 0.9])
-with col_menu:
-    if st.button("☰", key="nav_menu_toggle", use_container_width=True, type="secondary", help="打开导航"):
-        st.session_state.nav_drawer_open = not st.session_state.nav_drawer_open
-        st.rerun()
+# 消息详情页、人物设置页不显示顶部菜单行，主内容全宽以便昵称栏居中
+if st.session_state.view_mode not in ("chat", "edit_char"):
+    col_menu, col_title = st.columns([0.1, 0.9])
+    with col_menu:
+        if st.button("☰", key="nav_menu_toggle", use_container_width=True, type="secondary", help="打开导航"):
+            st.session_state.nav_drawer_open = not st.session_state.nav_drawer_open
+            st.rerun()
+    with col_title:
+        pass
 
 if st.session_state.nav_drawer_open:
     col_drawer, col_main = st.columns([0.28, 0.72])
     with col_drawer:
-        st.markdown("### 🪽 导航")
+        st.markdown("### 📜 导航")
         st.caption("选择要去的页面")
         st.markdown("---")
         for label, tab_name in NAV_ITEMS:
@@ -1893,7 +1901,7 @@ if st.session_state.nav_drawer_open:
             elif st.session_state.view_mode == "edit_char":
                 render_edit_persona()
             else:
-                if st.session_state.active_tab == "Echoem":
+                if st.session_state.active_tab == "Narratio":
                     render_chat_list_page()
                 elif st.session_state.active_tab == "通讯录":
                     render_contacts_page()
@@ -1909,7 +1917,7 @@ else:
         elif st.session_state.view_mode == "edit_char":
             render_edit_persona()
         else:
-            if st.session_state.active_tab == "Echoem":
+            if st.session_state.active_tab == "Narratio":
                 render_chat_list_page()
             elif st.session_state.active_tab == "通讯录":
                 render_contacts_page()
