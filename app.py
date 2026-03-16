@@ -309,6 +309,15 @@ st.markdown("""
         text-align: center !important;
         justify-content: center !important;
     }
+    /* 通讯录页多选好友时，已选昵称标签样式：黑底白字 */
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+        background-color: #000000 !important;
+        color: #FFFFFF !important;
+        border-radius: 999px !important;
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] span {
+        color: #FFFFFF !important;
+    }
     .comment-input-container {
         margin-top: 8px !important;
         padding-top: 8px !important;
@@ -471,8 +480,9 @@ try:
 except Exception:
     _cookie_secret = os.environ.get("COOKIES_PASSWORD", "narratio-remember-secret")
 cookies = EncryptedCookieManager(prefix="narratio/", password=_cookie_secret)
-if not cookies.ready():
-    st.stop()
+# 这里不再在 cookies 尚未 ready 时直接 st.stop()，否则在首次加载或退出登录后
+# 可能出现整页空白。即便 cookies 暂未就绪，后续读取将返回 None，
+# 登录页面仍可正常渲染。
 
 import bcrypt
 
@@ -494,7 +504,9 @@ def save_cloud_data():
             supabase.table("user_data").update({
                 "profile": st.session_state.user_profile,
                 "characters": st.session_state.characters,
-                "moments": st.session_state.moments
+                "moments": st.session_state.moments,
+                # 新增群聊数据
+                "groups": st.session_state.get("groups", [])
             }).eq("username", st.session_state.username).execute()
         except Exception as e:
             st.error(f"数据保存失败: {str(e)}")
@@ -785,6 +797,10 @@ def compute_favorability_change(char, user_msg, ai_response):
 
 def try_restore_session_from_cookie():
     """从持久化 Cookie 恢复登录状态（同一设备再次打开网页时免登录）"""
+    # 如果 Cookie 管理器尚未就绪，先不标记结果，等待下一轮重试，
+    # 避免访问 cookies 时抛出 CookiesNotReady 异常。
+    if not cookies.ready():
+        return False
     val = cookies.get("narratio_login")
     if not val:
         return False
@@ -804,12 +820,15 @@ def try_restore_session_from_cookie():
             if "memory_bank" not in char:
                 char["memory_bank"] = {"core_memories": [], "recent_context": []}
             char.setdefault("favorability", 30)
+        # 新增：群聊数据（兼容旧数据）
+        groups = row.get("groups") or []
         st.session_state.update({
             "password_correct": True,
             "username": username,
             "user_profile": row.get("profile") or {},
             "characters": characters,
-            "moments": row.get("moments") or []
+            "moments": row.get("moments") or [],
+            "groups": groups
         })
         return True
     except Exception:
@@ -820,9 +839,21 @@ def validate_username(username):
     return bool(re.match(r'^[a-zA-Z0-9]+$', username))
 
 def check_password():
-    # 未登录时先尝试从持久化 Cookie 恢复（同一设备再次打开直接进主页）
-    if "password_correct" not in st.session_state and try_restore_session_from_cookie():
-        st.rerun()
+    # 未登录时先尝试从持久化 Cookie 恢复（同一设备再次打开直接进主页）。
+    # 恢复逻辑分两步：
+    # 1）等待 cookies.ready() 为 True，再决定是否有可用登录信息；
+    # 2）只在确认 cookies.ready() 后做一次最终判定，避免在登录页输入过程中
+    #    反复被之前账号“抢回去”。
+    if "password_correct" not in st.session_state:
+        if not st.session_state.get("auto_restore_finalized", False):
+            if cookies.ready():
+                if try_restore_session_from_cookie():
+                    # 成功从 Cookie 恢复，直接进入主页
+                    st.session_state["auto_restore_finalized"] = True
+                    st.rerun()
+                else:
+                    # cookies 已就绪但没有有效登录信息，本轮之后不再尝试自动恢复
+                    st.session_state["auto_restore_finalized"] = True
     if "password_correct" not in st.session_state:
         # 优化登录页面布局
         st.markdown("""
@@ -860,6 +891,7 @@ def check_password():
                                 "recent_context": []
                             }
                         char.setdefault("favorability", 30)
+                    groups = res.data[0].get("groups") or []
                     # 持久登录：写入 Cookie，30 天内同一设备免登录
                     login_payload = json.dumps({"username": u, "exp": time.time() + 30 * 24 * 3600})
                     cookies["narratio_login"] = login_payload
@@ -869,7 +901,8 @@ def check_password():
                         "username":u, 
                         "user_profile":res.data[0]["profile"], 
                         "characters":characters, 
-                        "moments":res.data[0]["moments"] or []
+                        "moments":res.data[0]["moments"] or [],
+                        "groups": groups
                     })
                     st.rerun()
                 else: 
@@ -948,6 +981,10 @@ def get_current_char():
     char_id = st.session_state.get("current_char_id")
     return next((c for c in st.session_state.characters if c["id"] == char_id), None)
 
+def get_current_group():
+    group_id = st.session_state.get("current_group_id")
+    return next((g for g in st.session_state.get("groups", []) if g["id"] == group_id), None)
+
 def get_api_info(char):
     """返回 (api_key, model, base_url)"""
     key = char.get("api_key") or st.session_state.user_profile.get("global_api_key", "")
@@ -960,6 +997,10 @@ if "active_tab" not in st.session_state: st.session_state.active_tab = "Narratio
 if "view_mode" not in st.session_state: st.session_state.view_mode = "main"
 if "reply_to_comment" not in st.session_state: st.session_state.reply_to_comment = {}
 if "nav_drawer_open" not in st.session_state: st.session_state.nav_drawer_open = False
+if "groups" not in st.session_state: st.session_state.groups = []
+if "current_group_id" not in st.session_state: st.session_state.current_group_id = None
+if "view_mode" in st.session_state and st.session_state.view_mode not in ("main", "chat", "edit_char", "chat_group", "edit_group"):
+    st.session_state.view_mode = "main"
 
 # ===================== 4. 朋友圈 AI 互动引擎 =====================
 
@@ -1047,13 +1088,19 @@ def handle_moment_interaction(moment, user_text, target_char_name=None, reply_to
 def render_chat_list_page():
     st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>消息</h3>", unsafe_allow_html=True)
 
-    # 类微信：按最近消息条数近似排序（真实项目可存 timestamp）
-    def last_ts(c):
+    # 单聊按最近消息条数近似排序（真实项目可存 timestamp）
+    def last_ts_single(c):
         return len(c.get("messages", []))
 
-    display_chars = sorted(st.session_state.characters, key=last_ts, reverse=True)
+    display_chars = sorted(st.session_state.characters, key=last_ts_single, reverse=True)
 
-    if not display_chars:
+    # 群聊同样按消息条数排序
+    def last_ts_group(g):
+        return len(g.get("messages", []))
+
+    display_groups = sorted(st.session_state.get("groups", []), key=last_ts_group, reverse=True)
+
+    if not display_chars and not display_groups:
         st.markdown("""
         <div class="empty-state">
             <div class="empty-icon">💬</div>
@@ -1070,7 +1117,7 @@ def render_chat_list_page():
         last = msgs[-1]["content"] if msgs else "暂无消息"
         last_msgs[c["id"]] = (last or "暂无消息").replace("\n", " ").strip()
 
-    # 渲染消息列表：左侧纯展示，右侧小箭头按钮负责跳转
+    # 渲染单聊会话：左侧纯展示，右侧小箭头按钮负责跳转
     for char in display_chars:
         last_msg = last_msgs.get(char["id"], "暂无消息")
         safe_name = html.escape(char["name"])
@@ -1100,6 +1147,40 @@ def render_chat_list_page():
             if st.button("›", key=f"go_{char['id']}", help=f"与 {char['name']} 聊天", use_container_width=True):
                 st.session_state.current_char_id = char["id"]
                 st.session_state.view_mode = "chat"
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # 渲染群聊会话列表
+    for group in display_groups:
+        last_msg = (group.get("messages", [])[-1]["content"]
+                    if group.get("messages") else "暂无消息")
+        safe_name = html.escape(group.get("name", "未命名群聊"))
+        safe_last_msg = html.escape((last_msg or "暂无消息").replace("\n", " ").strip())
+        # 群聊头像：简单用一个圆形图标表示
+        avatar_html = "<div style='width:44px;height:44px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:22px;'>👩‍👧‍👦</div>"
+
+        chat_html = f"""
+        <div class="chat-item">
+            <div style="display: flex; align-items: center; width: 100%;">
+                <div style="flex-shrink: 0; margin-right: 12px;">
+                    {avatar_html}
+                </div>
+                <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                    <div style="font-size:16px; font-weight:600; color:#000000; line-height:1.4; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{safe_name}</div>
+                    <div style="font-size:13px; color:#8E8E8E; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;">{safe_last_msg}</div>
+                </div>
+            </div>
+        </div>
+        """
+
+        col1, col2 = st.columns([0.9, 0.1])
+        with col1:
+            st.markdown(chat_html, unsafe_allow_html=True)
+        with col2:
+            st.markdown('<div class="chat-arrow" style="display:flex;align-items:center;justify-content:center;height:100%;">', unsafe_allow_html=True)
+            if st.button("›", key=f"go_group_{group['id']}", help=f"进入群聊 {group.get('name','')}", use_container_width=True):
+                st.session_state.current_group_id = group["id"]
+                st.session_state.view_mode = "chat_group"
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1301,135 +1382,132 @@ def render_chat_session():
         st.rerun()
 
     if char["messages"] and char["messages"][-1]["role"] == "user":
-        # 将“对方正在输入中...”提示固定在顶部昵称区域下方
-        with typing_placeholder:
-            with st.spinner("对方正在输入中..."):
-                key, mod, base_url = get_api_info(char)
-                if not key: 
-                    st.error("缺失 API Key，请前往「我」页面配置全局 API Key 或为该角色单独配置", icon="❌")
-                    return
-                try:
-                    client = OpenAI(api_key=key, base_url=base_url)
-                    sys_prompt = build_system_prompt(char, scene="chat")
-                    
-                    # 使用记忆库的上下文（最近10条 + 核心记忆已在system prompt中）
-                    context_msgs = get_context_messages(char)
-                    
-                    resp = client.chat.completions.create(
-                        model=mod,
-                        messages=[{"role": "system", "content": sys_prompt}] + context_msgs
-                    )
-                    raw = resp.choices[0].message.content or ""
-                    
-                    # 更新记忆库（在显示之前完成）
-                    user_msg = char["messages"][-1]["content"]
-                    update_memory_bank(char, user_msg, raw)
-                    # 好感度：由 AI 判断本轮是否增减
-                    delta = compute_favorability_change(char, user_msg, raw)
-                    if delta != 0:
-                        fav = int(char.get("favorability", 30))
-                        char["favorability"] = max(0, min(100, fav + delta))
-                    
-                    # 支持转账写法：
-                    # 1）标准指令：转账卡|金额=XXX|备注=...
-                    # 2）拆成多条：转账卡｜金额=XXX｜备注=...
-                    # 3）自然语言 fallback：转账 10 元。备注：XXX
+        key, mod, base_url = get_api_info(char)
+        if not key: 
+            st.error("缺失 API Key，请前往「我」页面配置全局 API Key 或为该角色单独配置", icon="❌")
+            return
+        try:
+            client = OpenAI(api_key=key, base_url=base_url)
+            sys_prompt = build_system_prompt(char, scene="chat")
+            
+            # 使用记忆库的上下文（最近10条 + 核心记忆已在system prompt中）
+            context_msgs = get_context_messages(char)
+            
+            resp = client.chat.completions.create(
+                model=mod,
+                messages=[{"role": "system", "content": sys_prompt}] + context_msgs
+            )
+            raw = resp.choices[0].message.content or ""
+            
+            # 更新记忆库（在显示之前完成）
+            user_msg = char["messages"][-1]["content"]
+            update_memory_bank(char, user_msg, raw)
+            # 好感度：由 AI 判断本轮是否增减
+            delta = compute_favorability_change(char, user_msg, raw)
+            if delta != 0:
+                fav = int(char.get("favorability", 30))
+                char["favorability"] = max(0, min(100, fav + delta))
+            
+            # 支持转账写法：
+            # 1）标准指令：转账卡|金额=XXX|备注=...
+            # 2）拆成多条：转账卡｜金额=XXX｜备注=...
+            # 3）自然语言 fallback：转账 10 元。备注：XXX
+            pending_transfer = None
+            for seg in re.split(r"[｜|\n]+", raw):
+                seg = seg.strip()
+                if not seg:
+                    continue
+
+                # 情况 A：一行写完的转账指令
+                if seg.startswith("转账卡|"):
+                    try:
+                        amt_match = re.search(r"金额=([0-9]+(?:\.[0-9]+)?)", seg)
+                        note_match = re.search(r"备注=([^|]+)", seg)
+                        amount = float(amt_match.group(1)) if amt_match else 0.0
+                        note = note_match.group(1).strip() if note_match else ""
+                    except Exception:
+                        amount, note = 0.0, ""
+                    desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
+                    clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
+                    char["messages"].append({
+                        "role": "assistant",
+                        "content": clean_desc,
+                        "type": "transfer",
+                        "amount": round(float(amount), 2),
+                        "note": note,
+                        "direction": "to_user",
+                        "status": "未收款"
+                    })
+                    continue
+
+                # 情况 B：拆成多条的转账指令（转账卡｜金额=XXX｜备注=...）
+                if seg == "转账卡":
+                    pending_transfer = {"amount": None, "note": ""}
+                    continue
+                if seg.startswith("金额="):
+                    if pending_transfer is None:
+                        pending_transfer = {"amount": None, "note": ""}
+                    try:
+                        pending_transfer["amount"] = float(seg.split("=", 1)[1])
+                    except Exception:
+                        pending_transfer["amount"] = 0.0
+                    continue
+
+                # 情况 C：自然语言格式的转账描述（兜底）
+                # 例如：转账 10.0 元。备注：买骨头
+                if seg.startswith("转账") and "备注" in seg:
+                    try:
+                        m_amount = re.search(r"转账\s*([0-9]+(?:\.[0-9]+)?)", seg)
+                        m_note = re.search(r"备注[:：]\s*(.+)", seg)
+                        amount = float(m_amount.group(1)) if m_amount else 0.0
+                        note = m_note.group(1).strip() if m_note else ""
+                    except Exception:
+                        amount, note = 0.0, ""
+                    desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
+                    clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
+                    char["messages"].append({
+                        "role": "assistant",
+                        "content": clean_desc,
+                        "type": "transfer",
+                        "amount": round(float(amount), 2),
+                        "note": note,
+                        "direction": "to_user",
+                        "status": "未收款"
+                    })
+                    continue
+                if seg.startswith("备注="):
+                    if pending_transfer is None:
+                        pending_transfer = {"amount": None, "note": ""}
+                    pending_transfer["note"] = seg.split("=", 1)[1].strip()
+                    # 到这里视为信息齐全，可以落地一张转账卡
+                    amount = pending_transfer.get("amount") or 0.0
+                    note = pending_transfer.get("note", "")
+                    desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
+                    clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
+                    char["messages"].append({
+                        "role": "assistant",
+                        "content": clean_desc,
+                        "type": "transfer",
+                        "amount": round(float(amount), 2),
+                        "note": note,
+                        "direction": "to_user",
+                        # 默认均为“未收款”，等待玩家点击收款后再变为“已收款”
+                        "status": "未收款"
+                    })
                     pending_transfer = None
-                    for seg in re.split(r"[｜|\n]+", raw):
-                        seg = seg.strip()
-                        if not seg:
-                            continue
+                    continue
 
-                        # 情况 A：一行写完的转账指令
-                        if seg.startswith("转账卡|"):
-                            try:
-                                amt_match = re.search(r"金额=([0-9]+(?:\.[0-9]+)?)", seg)
-                                note_match = re.search(r"备注=([^|]+)", seg)
-                                amount = float(amt_match.group(1)) if amt_match else 0.0
-                                note = note_match.group(1).strip() if note_match else ""
-                            except Exception:
-                                amount, note = 0.0, ""
-                            desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
-                            clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
-                            char["messages"].append({
-                                "role": "assistant",
-                                "content": clean_desc,
-                                "type": "transfer",
-                                "amount": round(float(amount), 2),
-                                "note": note,
-                                "direction": "to_user",
-                                "status": "未收款"
-                            })
-                            continue
-
-                        # 情况 B：拆成多条的转账指令（转账卡｜金额=XXX｜备注=...）
-                        if seg == "转账卡":
-                            pending_transfer = {"amount": None, "note": ""}
-                            continue
-                        if seg.startswith("金额="):
-                            if pending_transfer is None:
-                                pending_transfer = {"amount": None, "note": ""}
-                            try:
-                                pending_transfer["amount"] = float(seg.split("=", 1)[1])
-                            except Exception:
-                                pending_transfer["amount"] = 0.0
-                            continue
-
-                        # 情况 C：自然语言格式的转账描述（兜底）
-                        # 例如：转账 10.0 元。备注：买骨头
-                        if seg.startswith("转账") and "备注" in seg:
-                            try:
-                                m_amount = re.search(r"转账\s*([0-9]+(?:\.[0-9]+)?)", seg)
-                                m_note = re.search(r"备注[:：]\s*(.+)", seg)
-                                amount = float(m_amount.group(1)) if m_amount else 0.0
-                                note = m_note.group(1).strip() if m_note else ""
-                            except Exception:
-                                amount, note = 0.0, ""
-                            desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
-                            clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
-                            char["messages"].append({
-                                "role": "assistant",
-                                "content": clean_desc,
-                                "type": "transfer",
-                                "amount": round(float(amount), 2),
-                                "note": note,
-                                "direction": "to_user",
-                                "status": "未收款"
-                            })
-                            continue
-                        if seg.startswith("备注="):
-                            if pending_transfer is None:
-                                pending_transfer = {"amount": None, "note": ""}
-                            pending_transfer["note"] = seg.split("=", 1)[1].strip()
-                            # 到这里视为信息齐全，可以落地一张转账卡
-                            amount = pending_transfer.get("amount") or 0.0
-                            note = pending_transfer.get("note", "")
-                            desc = f"转账 {amount} 元。备注：{note}" if amount else (note or "转账")
-                            clean_desc = re.sub(r"[（(][^）)]*[）)]", "", desc).strip() or desc
-                            char["messages"].append({
-                                "role": "assistant",
-                                "content": clean_desc,
-                                "type": "transfer",
-                                "amount": round(float(amount), 2),
-                                "note": note,
-                                "direction": "to_user",
-                                # 默认均为“未收款”，等待玩家点击收款后再变为“已收款”
-                                "status": "未收款"
-                            })
-                            pending_transfer = None
-                            continue
-
-                        # 普通文本消息：清理括号动作
-                        seg_clean = re.sub(r"[（(][^）)]*[）)]", "", seg).strip()
-                        if not seg_clean:
-                            continue
-                        char["messages"].append({"role": "assistant", "content": seg_clean})
-                    # 立即保存并刷新，减少延迟
-                    save_cloud_data()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"对话出错：{str(e)}", icon="❌")
-                    return
+                # 普通文本消息：清理括号动作
+                seg_clean = re.sub(r"[（(][^）)]*[）)]", "", seg).strip()
+                if not seg_clean:
+                    continue
+                char["messages"].append({"role": "assistant", "content": seg_clean})
+            # 立即保存并刷新，减少延迟
+            save_cloud_data()
+            st.rerun()
+        except Exception as e:
+            st.error(f"对话出错：{str(e)}", icon="❌")
+            return
 
 def render_edit_persona():
     char = get_current_char()
@@ -1529,7 +1607,16 @@ def render_edit_persona():
         save_cloud_data()
         st.session_state.view_mode = "chat"
         st.rerun()
-    if st.button("删除角色", use_container_width=True, type="secondary"):
+    if st.button("清空聊天记录", use_container_width=True, type="secondary"):
+        char["messages"] = []
+        # 只清空最近对话，不动长期记忆与好感度
+        if "memory_bank" in char:
+            char["memory_bank"]["recent_context"] = []
+        save_cloud_data()
+        st.success("已清空与该角色的聊天记录。", icon="✅")
+        time.sleep(1)
+        st.rerun()
+    if st.button("删除角色", use_container_width=True):
         if st.checkbox("确认删除该角色（不可恢复）", key="confirm_delete_char"):
             st.session_state.characters.remove(char)
             save_cloud_data()
@@ -1539,6 +1626,348 @@ def render_edit_persona():
             st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
+
+def render_edit_group():
+    """群聊设置页：修改名称、成员、头像，支持解散群聊"""
+    group = get_current_group()
+    if not group:
+        st.session_state.view_mode = "main"
+        st.rerun()
+        return
+
+    st.markdown(
+        f"<h3 style='margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>编辑群聊：{html.escape(group.get('name','群聊'))}</h3>",
+        unsafe_allow_html=True
+    )
+
+    # 基本信息
+    group["name"] = st.text_input("群聊名称", group.get("name", ""), placeholder="请输入群聊名称")
+
+    # 成员增删：用已有角色多选
+    st.subheader("群成员", divider="gray")
+    all_chars = st.session_state.characters
+    if not all_chars:
+        st.info("当前还没有任何 AI 好友，请先在通讯录中创建角色。")
+    else:
+        name_to_id = {c["name"]: c["id"] for c in all_chars}
+        current_names = [c["name"] for c in all_chars if c["id"] in group.get("member_ids", [])]
+        selected_names = st.multiselect(
+            "选择群聊成员",
+            options=list(name_to_id.keys()),
+            default=current_names
+        )
+        group["member_ids"] = [name_to_id[n] for n in selected_names]
+
+    # 群头像
+    st.subheader("群头像", divider="gray")
+    current_avatar = group.get("avatar")
+    if current_avatar:
+        st.image(current_avatar, width=80)
+    else:
+        st.markdown(
+            "<div style='width:80px;height:80px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:40px;'>👩‍👧‍👦</div>",
+            unsafe_allow_html=True
+        )
+    new_group_av = st.file_uploader("上传新的群头像", type=["png", "jpg", "jpeg"], key="group_avatar_upload")
+    if st.button("保存群头像", key="save_group_avatar", use_container_width=True):
+        if new_group_av:
+            group["avatar"] = process_uploaded_image(new_group_av, (200, 200))
+            save_cloud_data()
+            st.success("群头像已更新！", icon="✅")
+            time.sleep(1)
+            st.rerun()
+
+    st.markdown("---")
+    # 按钮区纵向排列：保存返回 / 清空聊天记录 / 解散群聊
+    if st.button("保存设置并返回群聊", use_container_width=True, type="primary"):
+        save_cloud_data()
+        st.session_state.view_mode = "chat_group"
+        st.rerun()
+
+    if st.button("清空群聊聊天记录", use_container_width=True, type="secondary"):
+        group["messages"] = []
+        group["last_user_msg"] = ""
+        group["need_ai_reply"] = False
+        save_cloud_data()
+        st.success("已清空该群聊的聊天记录。", icon="✅")
+        time.sleep(1)
+        st.rerun()
+
+    confirm_key = f"confirm_disband_group_{group['id']}"
+    st.checkbox("确认解散该群聊（不可恢复）", key=confirm_key)
+    if st.button("解散该群聊", use_container_width=True):
+        if st.session_state.get(confirm_key):
+            # 从会话中移除该群
+            st.session_state.groups = [g for g in st.session_state.groups if g["id"] != group["id"]]
+            save_cloud_data()
+            st.session_state.current_group_id = None
+            st.session_state.view_mode = "main"
+            st.success("群聊已解散。", icon="✅")
+            time.sleep(1)
+            st.rerun()
+
+def render_group_chat_session():
+    """群聊会话：多个 AI 好友共同参与"""
+    group = get_current_group()
+    if not group:
+        st.session_state.view_mode = "main"
+        st.rerun()
+        return
+
+    members = [c for c in st.session_state.characters if c["id"] in group.get("member_ids", [])]
+    if not members:
+        st.warning("该群聊还没有有效的成员，请在通讯录中为该账号添加好友后重新创建群聊。")
+        return
+
+    # 顶部：以群聊名称作为下拉菜单按键（返回 / 设置）
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    with col_left:
+        st.write("")
+    with col_center:
+        group_title = html.escape(group.get("name", "群聊"))
+        with st.popover(group_title):
+            if st.button("🔙 返回消息列表", key="group_header_back", use_container_width=True):
+                st.session_state.view_mode = "main"
+                st.rerun()
+            if st.button("⚙️ 群聊设置", key="group_header_settings", use_container_width=True):
+                st.session_state.view_mode = "edit_group"
+                st.rerun()
+    with col_right:
+        st.write("")
+
+    st.markdown("<hr style='margin:4px 0 8px 0; border:none; border-top:1px solid #DBDBDB;'/>", unsafe_allow_html=True)
+
+    user_av = get_avatar_display(st.session_state.user_profile.get("avatar"), "👤")
+
+    # 消息渲染：支持显示发送者昵称与转账卡片
+    for idx, m in enumerate(group.get("messages", [])):
+        is_user = m.get("role") == "user"
+        sender_name = m.get("sender_name", st.session_state.user_profile.get("nickname") if is_user else "")
+        if is_user:
+            av = user_av
+        else:
+            char = next((c for c in members if c["id"] == m.get("char_id")), None)
+            av = get_avatar_display(char.get("avatar"), "📜") if char else "📜"
+            sender_name = char["name"] if char else (sender_name or "好友")
+
+        if isinstance(av, str) and av.startswith("http"):
+            av_html = f"<img src='{av}' style='width:100%;height:100%;object-fit:cover;'>"
+        else:
+            av_html = av
+
+        msg_type = m.get("type", "text")
+        # 转账卡片（仅用于 AI -> 用户的转账展示）
+        if msg_type == "transfer" and not is_user:
+            amount = m.get("amount", 0)
+            note = m.get("note", "")
+            status = m.get("status", "未收款")
+            who = "TA 向你转账"
+            card_cls = "transfer-card received" if status == "已收款" else "transfer-card"
+
+            safe_who = safe_text(who)
+            safe_note = safe_text(note)
+            safe_status = safe_text(status)
+
+            html_block = f"""
+<div class="chat-bubble-row">
+  <div class="chat-bubble-avatar">{av_html}</div>
+  <div class="chat-bubble-content" style="background:transparent; padding:0; border-radius:0;">
+    <div class="{card_cls}">
+      <div class="transfer-title">{safe_who}</div>
+      <div class="transfer-amount">¥ {amount}</div>
+      <div class="transfer-note">{safe_note}</div>
+      <div class="transfer-status">{safe_status}</div>
+    </div>
+  </div>
+</div>
+"""
+            st.markdown(html_block, unsafe_allow_html=True)
+            # 群聊中也支持“收款”：当状态为未收款时，提供一个收款按钮，
+            # 点击后将当前转账标记为“已收款”，并切换为浅色卡片。
+            if status != "已收款":
+                col = st.columns([1, 2, 1])
+                with col[1]:
+                    if st.button("点击收款", key=f"group_recv_{group['id']}_{m.get('id', idx)}", use_container_width=True):
+                        m["status"] = "已收款"
+                        save_cloud_data()
+                        st.rerun()
+            continue
+
+        safe_content = safe_text(m.get("content", ""))
+        safe_sender = safe_text(sender_name)
+
+        if is_user:
+            html_block = f"""
+<div class="chat-bubble-row me">
+  <div class="chat-bubble-content chat-bubble-me">
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:2px;text-align:right;">{safe_sender}</div>
+    {safe_content}
+  </div>
+  <div class="chat-bubble-avatar">{av_html}</div>
+</div>
+"""
+        else:
+            html_block = f"""
+<div class="chat-bubble-row">
+  <div class="chat-bubble-avatar">{av_html}</div>
+  <div class="chat-bubble-content chat-bubble-other">
+    <div style="font-size:11px;color:#D1D5DB;margin-bottom:2px;text-align:left;">{safe_sender}</div>
+    {safe_content}
+  </div>
+</div>
+"""
+        st.markdown(html_block, unsafe_allow_html=True)
+
+    # 输入框：只负责写入自己的消息并触发一次 rerun，让消息立刻显示
+    prompt = st.chat_input("在群里说点什么...", key="group_chat_input")
+    if prompt:
+        clean = re.sub(r"[（(][^）)]*[）)]", "", prompt).strip() or prompt
+        group.setdefault("messages", [])
+        group["messages"].append({
+            "role": "user",
+            "content": clean,
+            "sender_name": st.session_state.user_profile.get("nickname", st.session_state.username)
+        })
+        # 记录最近一条用户消息，用于后续判断要由哪位群成员来回应
+        group["last_user_msg"] = clean
+        # 标记需要 AI 回复，交给下一轮渲染处理，避免发送后长时间无反馈
+        group["need_ai_reply"] = True
+        save_cloud_data()
+        st.rerun()
+
+    # 如果存在待处理的 AI 回复，在本轮渲染中统一处理
+    if group.get("need_ai_reply"):
+        # 根据用户最近一条消息内容，智能选择更合适的回应者：
+        # - 如果明确提到了某个角色的名字，仅由被点名者回应；
+        # - 如果提到了多个名字，从中选 1~2 位回应；
+        # - 否则从所有成员中随机选 1 位主回应者，另加 0~1 位旁观回应者。
+        import random as _rnd
+        last_msg = group.get("last_user_msg", "")
+        mentioned = []
+        if last_msg:
+            for c in members:
+                name = c.get("name") or ""
+                if name and name in last_msg:
+                    mentioned.append(c)
+        if mentioned:
+            base = mentioned
+        else:
+            base = members
+
+        if len(base) <= 1:
+            responders = base
+        else:
+            # 至少一位，至多两位
+            num_responders = min(len(base), 2)
+            responders = _rnd.sample(base, num_responders)
+
+        for char in responders:
+            api_key, model, base_url = get_api_info(char)
+            if not api_key:
+                continue
+            try:
+                client = OpenAI(api_key=api_key, base_url=base_url)
+                # 群聊场景 system prompt：在原有设定上补充「群聊」说明
+                sys_prompt = build_system_prompt(char, scene="chat") + "\n\n【当前为群聊场景】你正在一个包含多位好友的群聊中回复对方，请保持自然、简短。"
+
+                # 上下文：从群聊消息中抽取最近若干条。
+                # 为了避免模型学会输出“某某: 内容”这种不真实的群聊格式，
+                # 这里只提供纯内容，不再在前面加「人名+冒号」前缀；
+                # 同时也不在群聊里鼓励使用“转账卡」指令。
+                history = []
+                for msg in group["messages"][-10:]:
+                    content = msg.get("content", "")
+                    if msg.get("role") == "user":
+                        history.append({"role": "user", "content": content})
+                    else:
+                        history.append({"role": "assistant", "content": content})
+
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": sys_prompt}] + history
+                )
+                raw = resp.choices[0].message.content or ""
+
+                # 兼容“用竖线分多条消息”的写作方式，每段单独成气泡；
+                # 同时去掉模型可能加上的「某某: 」前缀，只保留自然对话内容；
+                # 并支持与私聊相同的转账卡片写法，在群聊中展示为 TA -> 你 的转账卡。
+                pending_transfer = None
+                for seg in re.split(r"[｜|\n]+", raw):
+                    seg = seg.strip()
+                    if not seg:
+                        continue
+
+                    # 情况 A：一行写完的转账指令：转账卡|金额=XXX|备注=...
+                    if seg.startswith("转账卡|"):
+                        try:
+                            amt_match = re.search(r"金额=([0-9]+(?:\.[0-9]+)?)", seg)
+                            note_match = re.search(r"备注=([^|]+)", seg)
+                            amount = float(amt_match.group(1)) if amt_match else 0.0
+                            note = note_match.group(1).strip() if note_match else ""
+                        except Exception:
+                            amount, note = 0.0, ""
+                        group["messages"].append({
+                            "role": "assistant",
+                            "content": "",
+                            "type": "transfer",
+                            "amount": round(float(amount), 2),
+                            "note": note,
+                            "direction": "to_user",
+                            "status": "未收款",
+                            "char_id": char["id"],
+                            "sender_name": char["name"]
+                        })
+                        continue
+
+                    # 情况 B：拆成多条的转账指令（转账卡｜金额=XXX｜备注=...）
+                    if seg == "转账卡":
+                        pending_transfer = {"amount": None, "note": ""}
+                        continue
+                    if seg.startswith("金额="):
+                        if pending_transfer is None:
+                            pending_transfer = {"amount": None, "note": ""}
+                        try:
+                            pending_transfer["amount"] = float(seg.split("=", 1)[1])
+                        except Exception:
+                            pending_transfer["amount"] = 0.0
+                        continue
+                    if seg.startswith("备注="):
+                        if pending_transfer is None:
+                            pending_transfer = {"amount": None, "note": ""}
+                        pending_transfer["note"] = seg.split("=", 1)[1].strip()
+                        amount = pending_transfer.get("amount") or 0.0
+                        note = pending_transfer.get("note", "")
+                        group["messages"].append({
+                            "role": "assistant",
+                            "content": "",
+                            "type": "transfer",
+                            "amount": round(float(amount), 2),
+                            "note": note,
+                            "direction": "to_user",
+                            "status": "未收款",
+                            "char_id": char["id"],
+                            "sender_name": char["name"]
+                        })
+                        pending_transfer = None
+                        continue
+
+                    # 普通文本：去掉类似「友人A:」「我：」这样的人称前缀与括号动作
+                    seg = re.sub(r"^[^：:]{1,8}[：:]\s*", "", seg)
+                    seg_clean = re.sub(r"[（(][^）)]*[）)]", "", seg).strip()
+                    if not seg_clean:
+                        continue
+                    group["messages"].append({
+                        "role": "assistant",
+                        "content": seg_clean,
+                        "char_id": char["id"],
+                        "sender_name": char["name"]
+                    })
+            except Exception:
+                continue
+
+        group["need_ai_reply"] = False
+        save_cloud_data()
+        st.rerun()
 
 def render_moments_page():
     st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>发现</h3>", unsafe_allow_html=True)
@@ -1783,6 +2212,36 @@ def render_contacts_page():
                 else:
                     st.warning("角色名称和人设不能为空", icon="⚠️")
 
+    st.divider()
+
+    # 新增：创建群聊
+    with st.expander("👥 创建群聊", expanded=False):
+        if not st.session_state.characters:
+            st.info("请先创建至少一个 AI 好友，再来创建群聊。")
+        else:
+            group_name = st.text_input("群聊名称", key="new_group_name", placeholder="例如：深夜闲聊小组")
+            # 以好友昵称多选
+            options = {c["name"]: c["id"] for c in st.session_state.characters}
+            selected_names = st.multiselect("选择要拉入群聊的好友", options=list(options.keys()))
+            if st.button("确认创建群聊", use_container_width=True, key="create_group_btn"):
+                if not group_name.strip():
+                    st.warning("群聊名称不能为空", icon="⚠️")
+                elif not selected_names:
+                    st.warning("请至少选择一位好友加入群聊", icon="⚠️")
+                else:
+                    member_ids = [options[n] for n in selected_names]
+                    new_group = {
+                        "id": uuid4().hex,
+                        "name": group_name.strip(),
+                        "member_ids": member_ids,
+                        "messages": []
+                    }
+                    st.session_state.groups.append(new_group)
+                    save_cloud_data()
+                    st.success("群聊创建成功，已出现在消息列表中。", icon="✅")
+                    time.sleep(1)
+                    st.rerun()
+
 def render_profile_page():
     st.markdown("<h3 style='text-align:center; margin:12px 0 20px 0; color:#000000; font-weight:600; font-size:1.2rem;'>个人中心</h3>", unsafe_allow_html=True)
     
@@ -1892,8 +2351,8 @@ def render_profile_page():
 
 NAV_ITEMS = [("💬 消息", "Narratio"), ("👥 通讯录", "通讯录"), ("🌍 发现", "发现"), ("👤 我", "我")]
 
-# 消息详情页、人物设置页不显示顶部菜单行，主内容全宽以便昵称栏居中
-if st.session_state.view_mode not in ("chat", "edit_char"):
+# 消息详情页、人物/群聊设置页不显示顶部菜单行，主内容全宽以便昵称栏居中
+if st.session_state.view_mode not in ("chat", "edit_char", "chat_group", "edit_group"):
     col_menu, col_title = st.columns([0.1, 0.9])
     with col_menu:
         if st.button("☰", key="nav_menu_toggle", use_container_width=True, type="secondary", help="打开导航"):
@@ -1928,6 +2387,10 @@ if st.session_state.nav_drawer_open:
                 render_chat_session()
             elif st.session_state.view_mode == "edit_char":
                 render_edit_persona()
+            elif st.session_state.view_mode == "chat_group":
+                render_group_chat_session()
+            elif st.session_state.view_mode == "edit_group":
+                render_edit_group()
             else:
                 if st.session_state.active_tab == "Narratio":
                     render_chat_list_page()
@@ -1944,6 +2407,10 @@ else:
             render_chat_session()
         elif st.session_state.view_mode == "edit_char":
             render_edit_persona()
+        elif st.session_state.view_mode == "chat_group":
+            render_group_chat_session()
+        elif st.session_state.view_mode == "edit_group":
+            render_edit_group()
         else:
             if st.session_state.active_tab == "Narratio":
                 render_chat_list_page()
