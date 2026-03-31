@@ -990,7 +990,14 @@ def get_api_info(char):
     key = char.get("api_key") or st.session_state.user_profile.get("global_api_key", "")
     provider_id = st.session_state.user_profile.get("global_provider", "deepseek")
     provider = _get_provider(provider_id)
-    mod = char.get("model") or st.session_state.user_profile.get("global_model") or provider["default_model"]
+    # 先取全局模型；若不属于当前服务商，自动回退默认模型
+    global_model = st.session_state.user_profile.get("global_model")
+    if not global_model or global_model not in provider["models"]:
+        global_model = provider["default_model"]
+
+    # 角色自定义模型仅在属于当前服务商时生效，避免切换服务商后仍卡在旧模型
+    char_model = (char.get("model") or "").strip()
+    mod = char_model if char_model and char_model in provider["models"] else global_model
     return key, mod, provider["base_url"]
 
 if "active_tab" not in st.session_state: st.session_state.active_tab = "Narratio"
@@ -1529,9 +1536,9 @@ def render_edit_persona():
     provider_id = st.session_state.user_profile.get("global_provider", "deepseek")
     provider = _get_provider(provider_id)
     model_options = [""] + provider["models"]
-    current_char_model = char.get("model") or ""
-    if current_char_model and current_char_model not in model_options:
-        model_options = [current_char_model] + [o for o in model_options if o]
+    current_char_model = (char.get("model") or "").strip()
+    if current_char_model not in model_options:
+        current_char_model = ""
     model_index = model_options.index(current_char_model) if current_char_model in model_options else 0
     char["model"] = st.selectbox("模型（选填，留空用全局）", options=model_options, index=model_index, format_func=lambda x: x or "使用全局设置")
     
@@ -2263,13 +2270,56 @@ def render_profile_page():
     st.markdown(f"<p style='color:#8E8E8E; font-size:13px;'>账号：{safe_username}（不可修改）</p>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # 个人设置表单
     st.markdown('<div class="profile-form-marker" aria-hidden="true"></div>', unsafe_allow_html=True)
+
+    st.subheader("AI 设置", divider="gray")
+    provider_options = [p["name"] for p in LLM_PROVIDERS]
+    current_provider_id = prof.get("global_provider", "deepseek")
+    current_provider_index = next((i for i, p in enumerate(LLM_PROVIDERS) if p["id"] == current_provider_id), 0)
+    selected_name = st.selectbox(
+        "选择模型服务",
+        options=provider_options,
+        index=current_provider_index,
+        key="profile_global_provider_name",
+        help="选择 DeepSeek、Kimi、GPT、Gemini 等（需对应 API Key）"
+    )
+    selected_provider = next((p for p in LLM_PROVIDERS if p["name"] == selected_name), LLM_PROVIDERS[0])
+    prof["global_provider"] = selected_provider["id"]
+
+    model_options = selected_provider["models"]
+    current_model = prof.get("global_model") or selected_provider["default_model"]
+    if current_model not in model_options:
+        current_model = selected_provider["default_model"]
+    model_index = model_options.index(current_model) if current_model in model_options else 0
+    prof["global_model"] = st.selectbox(
+        "选择模型",
+        options=model_options,
+        index=model_index,
+        key="profile_global_model_name",
+        help="不同服务商的模型名称不同，选错可能无法调用"
+    )
+    prof["global_api_key"] = st.text_input(
+        "API Key",
+        prof.get("global_api_key", ""),
+        type="password",
+        key="profile_global_api_key",
+        placeholder=f"{selected_provider['name']} API Key（所有角色默认使用）"
+    )
+    prof["self_persona"] = st.text_area(
+        "我的人设",
+        prof.get("self_persona", ""),
+        height=120,
+        key="profile_self_persona",
+        placeholder="描述你的身份、性格、喜好等，让 AI 更了解你\n例如：25岁的程序员，喜欢旅行和美食，性格开朗..."
+    )
+    if st.button("保存 AI 设置", use_container_width=True, key="save_ai_settings_btn"):
+        save_cloud_data()
+        st.success("AI 设置已同步到云端！", icon="✅")
+
     with st.form("profile_form", clear_on_submit=False):
         st.subheader("基本设置", divider="gray")
         prof["nickname"] = st.text_input("昵称", prof["nickname"], placeholder="修改你的显示昵称")
-        
-        # 头像上传
+
         st.markdown("<p style='margin:15px 0 5px 0; color:#374151;'>我的头像</p>", unsafe_allow_html=True)
         new_av = st.file_uploader("上传新头像", type=['png','jpg','jpeg'], label_visibility="collapsed")
         if new_av:
@@ -2277,55 +2327,14 @@ def render_profile_page():
             if av_url:
                 prof["avatar"] = av_url
                 st.success("头像已更新！", icon="✅")
-        
-        st.subheader("AI 设置", divider="gray")
-        # 选择 LLM 提供商
-        provider_options = [p["name"] for p in LLM_PROVIDERS]
-        current_provider_id = prof.get("global_provider", "deepseek")
-        current_provider = _get_provider(current_provider_id)
-        current_provider_index = next((i for i, p in enumerate(LLM_PROVIDERS) if p["id"] == current_provider_id), 0)
-        selected_name = st.selectbox(
-            "选择模型服务",
-            options=provider_options,
-            index=current_provider_index,
-            help="选择 DeepSeek、Kimi、GPT、Gemini 等（需对应 API Key）"
-        )
-        selected_provider = next((p for p in LLM_PROVIDERS if p["name"] == selected_name), LLM_PROVIDERS[0])
-        prof["global_provider"] = selected_provider["id"]
-        # 选择该提供商下的模型
-        model_options = selected_provider["models"]
-        current_model = prof.get("global_model") or selected_provider["default_model"]
-        if current_model not in model_options:
-            model_options = [current_model] + model_options
-        model_index = model_options.index(current_model) if current_model in model_options else 0
-        prof["global_model"] = st.selectbox(
-            "选择模型",
-            options=model_options,
-            index=model_index,
-            help="不同服务商的模型名称不同，选错可能无法调用"
-        )
-        prof["global_api_key"] = st.text_input(
-            "API Key", 
-            prof.get("global_api_key",""), 
-            type="password",
-            placeholder=f"{selected_provider['name']} API Key（所有角色默认使用）"
-        )
-        prof["self_persona"] = st.text_area(
-            "我的人设", 
-            prof.get("self_persona", ""), 
-            height=120,
-            placeholder="描述你的身份、性格、喜好等，让 AI 更了解你\n例如：25岁的程序员，喜欢旅行和美食，性格开朗..."
-        )
-        
-        # 密码修改功能
+
         st.subheader("密码修改", divider="gray")
         old_pwd = st.text_input("原密码", type="password", placeholder="请输入当前密码")
         new_pwd = st.text_input("新密码", type="password", placeholder="请设置新密码")
-        
-        # 按钮区域
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.form_submit_button("保存设置", use_container_width=True): 
+            if st.form_submit_button("保存设置", use_container_width=True):
                 save_cloud_data()
                 st.success("设置已同步到云端！", icon="✅")
         with col2:
@@ -2340,7 +2349,7 @@ def render_profile_page():
                     else:
                         st.error(msg, icon="❌")
         with col3:
-            if st.form_submit_button("退出登录", use_container_width=True): 
+            if st.form_submit_button("退出登录", use_container_width=True):
                 if "narratio_login" in cookies:
                     del cookies["narratio_login"]
                     cookies.save()
